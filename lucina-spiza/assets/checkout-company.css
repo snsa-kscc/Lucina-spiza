@@ -1,0 +1,12 @@
+/**
+ * Company invoice field toggle.
+ */
+.checkout-field-hidden {
+	display: none !important;
+}
+
+.ls-oib-error {
+	color: #cc1818;
+	font-size: 0.875em;
+	padding-top: 8px;
+}
