@@ -23,6 +23,7 @@ define( 'LUCINA_SPIZA_URL', plugin_dir_url( __FILE__ ) . 'lucina-spiza' );
 foreach ( array(
 	'vat.php',
 	'checkout-company.php',
+	'express-checkout.php',
 	'checkout-labels.php',
 	'gift-downloads.php',
 	'eracuni.php',
