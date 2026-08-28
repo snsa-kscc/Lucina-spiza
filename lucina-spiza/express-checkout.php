@@ -203,3 +203,54 @@ add_action(
 	5,
 	2
 );
+
+/**
+ * Relax the Stripe gateway's own required-customer-field check for express checkout.
+ *
+ * The Store API address validation is driven by the country locale, which the filters
+ * above already relax. The gateway runs a second, independent check when it creates the
+ * Stripe customer: WC_Stripe_Customer::validate_create_customer_request() derives its
+ * required fields from WC_Checkout::get_checkout_fields( 'billing' ) -- the classic
+ * checkout field set.
+ *
+ * That path does not consult the locale when the checkout field editor is configured to
+ * override the required property: THWCFD_Public_Checkout::billing_fields() replaces the
+ * billing fields with the saved wc_fields_billing option, and prepare_address_fields()
+ * only copies the locale's 'required' back when 'enable_required_override' is off. The
+ * locale filters above then have no effect there, so the order is created but the payment
+ * is rejected with "Missing required customer field: address->state".
+ *
+ * The Apple Pay sheet cannot supply a state for countries the gateway has no state list
+ * for, so drop that one requirement for exactly those countries, express checkout only.
+ */
+add_filter(
+	'wc_stripe_create_customer_required_fields',
+	function ( $required_fields, $create_customer_request = array() ) {
+		if ( ! is_array( $required_fields ) || ! lucina_spiza_is_express_checkout() ) {
+			return $required_fields;
+		}
+
+		if ( empty( $required_fields['address']['state'] ) ) {
+			return $required_fields;
+		}
+
+		$country = '';
+		if ( is_array( $create_customer_request ) && ! empty( $create_customer_request['address']['country'] ) ) {
+			$country = $create_customer_request['address']['country'];
+		}
+
+		if ( '' === $country || lucina_spiza_express_has_states( $country ) ) {
+			return $required_fields;
+		}
+
+		unset( $required_fields['address']['state'] );
+
+		if ( empty( $required_fields['address'] ) ) {
+			unset( $required_fields['address'] );
+		}
+
+		return $required_fields;
+	},
+	10,
+	2
+);
