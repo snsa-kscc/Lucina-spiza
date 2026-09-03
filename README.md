@@ -20,4 +20,5 @@ This repository contains a WordPress must-use plugin that holds site-specific cu
 - `checkout-labels.php` — Checkout label tweaks
 - `gift-downloads.php` — Gift download handling
 - `eracuni.php` — e-Računi integration
+- `email-texts.php` — WooCommerce e-mail copy overrides
 - `mail-audit.php` — Mail audit/logging utility

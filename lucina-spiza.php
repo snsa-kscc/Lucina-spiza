@@ -27,6 +27,7 @@ foreach ( array(
 	'checkout-labels.php',
 	'gift-downloads.php',
 	'eracuni.php',
+	'email-texts.php',
 ) as $lucina_spiza_module ) {
 	$lucina_spiza_path = LUCINA_SPIZA_DIR . '/' . $lucina_spiza_module;
 
