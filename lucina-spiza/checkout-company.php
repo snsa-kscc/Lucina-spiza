@@ -21,6 +21,67 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Whether the current checkout request is a non-Croatian company order that
+ * should be treated as VAT-exempt.
+ *
+ * The VAT helper validates HR OIBs fully and checks the country-specific EU VAT
+ * number format. Non-EU identifiers only need to be present.
+ *
+ * @param array<string,mixed> $billing Billing address request data.
+ * @return bool
+ */
+function lucina_spiza_is_company_vat_exempt( $billing ) {
+	if ( ! is_array( $billing ) ) {
+		return false;
+	}
+
+	$is_company = filter_var(
+		$billing['thwcfe-block/is_company_invoice'] ?? false,
+		FILTER_VALIDATE_BOOLEAN
+	);
+	$country    = strtoupper( trim( (string) ( $billing['country'] ?? '' ) ) );
+	$vat        = trim( (string) ( $billing['thwcfe-block/_billing_eu_vat_number'] ?? '' ) );
+
+	return $is_company
+		&& '' !== $country
+		&& 'HR' !== $country
+		&& '' !== $vat
+		&& lucina_spiza_validate_vat_for_country( $country, $vat );
+}
+
+/**
+ * Keep WooCommerce's native customer exemption flag in sync before cart totals
+ * are calculated by Store API address/checkout updates.
+ */
+add_action(
+	'woocommerce_store_api_cart_update_customer_from_request',
+	'lucina_spiza_store_api_update_customer_vat_exemption',
+	10,
+	2
+);
+add_action(
+	'woocommerce_store_api_checkout_update_customer_from_request',
+	'lucina_spiza_store_api_update_customer_vat_exemption',
+	10,
+	2
+);
+
+/**
+ * @param WC_Customer      $customer Customer being updated.
+ * @param WP_REST_Request  $request  Store API request.
+ * @return void
+ */
+function lucina_spiza_store_api_update_customer_vat_exemption( $customer, $request ) {
+	$billing = $request->get_param( 'billing_address' );
+
+	if ( ! is_array( $billing ) ) {
+		return;
+	}
+
+	$customer->set_is_vat_exempt( lucina_spiza_is_company_vat_exempt( $billing ) );
+}
+
+/**
  * Server-side: validate name OR company, and clear the fields that do not apply.
  */
 add_action(
@@ -28,7 +89,10 @@ add_action(
 	function ( $order, $request ) {
 		$billing    = $request->get_param( 'billing_address' );
 		$billing    = is_array( $billing ) ? $billing : array();
-		$is_company = ! empty( $billing['thwcfe-block/is_company_invoice'] );
+		$is_company = filter_var(
+			$billing['thwcfe-block/is_company_invoice'] ?? false,
+			FILTER_VALIDATE_BOOLEAN
+		);
 
 		if ( ! $is_company ) {
 			if ( '' === trim( $billing['first_name'] ?? '' ) || '' === trim( $billing['last_name'] ?? '' ) ) {
@@ -37,6 +101,7 @@ add_action(
 
 			// Clean company fields.
 			$order->set_billing_company( '' );
+			$order->update_meta_data( 'is_vat_exempt', 'no' );
 			$order->update_meta_data( '_billing_eu_vat_number', '' );
 
 			return;
@@ -62,6 +127,11 @@ add_action(
 					: 'Neispravan PDV broj. Provjerite format.'
 			);
 		}
+
+		$order->update_meta_data(
+			'is_vat_exempt',
+			lucina_spiza_is_company_vat_exempt( $billing ) ? 'yes' : 'no'
+		);
 
 		// Clear personal name fields for company invoices.
 		$order->set_billing_first_name( '' );
