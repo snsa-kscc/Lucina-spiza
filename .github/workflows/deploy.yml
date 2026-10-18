@@ -1,0 +1,140 @@
+# Deploy the mu-plugin over SFTP (the host has no shell, so no rsync/git).
+#
+# Push to main                      → staging    /public_html/labouche/wp-content/mu-plugins
+# Push to main with "[ci prod]"     → production /public_html/wp-content/mu-plugins (staging untouched)
+# Manual run (Actions → Deploy)     → pick the target
+#
+# Secrets: SSH_HOST, SSH_PORT, SSH_USER, SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lucina-spiza.php'
+      - 'mail-audit.php'
+      - 'lucina-spiza/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          # Hosting runs PHP 8.2 (see docs/vies-validation-proposal.md).
+          php-version: '8.2'
+          tools: none
+      - name: php -l
+        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l
+
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.pick.outputs.name }}
+      dir: ${{ steps.pick.outputs.dir }}
+    steps:
+      - name: Pick target
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            target="$INPUT_TARGET"
+          elif printf '%s' "$MESSAGE" | grep -qF '[ci prod]'; then
+            target=production
+          else
+            target=staging
+          fi
+
+          case "$target" in
+            production) dir=/public_html/wp-content/mu-plugins ;;
+            staging)    dir=/public_html/labouche/wp-content/mu-plugins ;;
+            *) echo "Unknown target: $target"; exit 1 ;;
+          esac
+
+          echo "name=$target" >> "$GITHUB_OUTPUT"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: [lint, target]
+    runs-on: ubuntu-latest
+    # GitHub environment per target, so production can get required reviewers.
+    environment: ${{ needs.target.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Upload
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          REMOTE_DIR: ${{ needs.target.outputs.dir }}
+        run: |
+          # Temp-file + rename so WordPress never loads a half-written PHP file.
+          # --delete only touches lucina-spiza/; mu-plugins siblings are left alone.
+          lftp <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set xfer:use-temp-file yes
+          set sftp:connect-program "ssh -a -x -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -p ${SSH_PORT:-22}"
+          open -u "$SSH_USER", "sftp://$SSH_HOST"
+          cd "$REMOTE_DIR"
+          mirror -R --delete --no-perms --verbose --exclude-glob .git* --exclude-glob .git*/ lucina-spiza/ lucina-spiza/
+          put lucina-spiza.php mail-audit.php
+          bye
+          EOF
+
+      - name: Verify
+        env:
+          TARGET: ${{ needs.target.outputs.name }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          REMOTE_DIR: ${{ needs.target.outputs.dir }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/remote"
+          cd "$RUNNER_TEMP/remote"
+          lftp <<EOF
+          set cmd:fail-exit yes
+          set sftp:connect-program "ssh -a -x -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -p ${SSH_PORT:-22}"
+          open -u "$SSH_USER", "sftp://$SSH_HOST"
+          cd "$REMOTE_DIR"
+          mirror --exclude-glob .git* --exclude-glob .git*/ lucina-spiza/ lucina-spiza/
+          get lucina-spiza.php mail-audit.php
+          bye
+          EOF
+          cd "$GITHUB_WORKSPACE"
+          diff -r --exclude='.git*' lucina-spiza "$RUNNER_TEMP/remote/lucina-spiza"
+          diff lucina-spiza.php "$RUNNER_TEMP/remote/lucina-spiza.php"
+          diff mail-audit.php "$RUNNER_TEMP/remote/mail-audit.php"
+          echo "**$TARGET** ($REMOTE_DIR) matches commit ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

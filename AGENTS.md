@@ -29,7 +29,8 @@ Checkout Field Editor Pro.
 - **Never modify production** (`/public_html` outside `labouche/`) without
   explicit approval.
 - The `luce` SSH host is **SFTP-only** — `exec request failed` on shell/exec.
-  Deployment = SFTP `put` or file ops over SSHFS.
+  Deployment = GitHub Actions on push to `main` (staging), or `[ci prod]` in
+  the commit message (production only); see `docs/deployment.md`.
 - **Do not run `git` over SSHFS** on remote checkouts — ownership (remote UID
   1786) and FETCH_HEAD writes fail. The staging mu-plugins dir is no longer a
   git repo anyway; upload changed files and verify with `sha256sum`.
@@ -71,5 +72,6 @@ exempts only non-`HR` billing countries.
 - `docs/b2b-vat-exemption.md` — the EU B2B over-charging bug, PR #1 fix,
   staging deployment.
 - `docs/remote-access.md` — SSH/SFTP/SSHFS access model and every pitfall hit.
+- `docs/deployment.md` — CI deploy to staging/production, secrets.
 - `docs/vies-validation-proposal.md` — proposed VIES lookup before granting
   B2B exemption; pending client decision. No code written yet.
