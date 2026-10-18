@@ -4,7 +4,8 @@
 # Push to main with "[ci prod]"     → production /public_html/wp-content/mu-plugins (staging untouched)
 # Manual run (Actions → Deploy)     → pick the target
 #
-# Secrets: SSH_HOST, SSH_PORT, SSH_USER, SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS.
+# Secrets: SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS. Host/user/port below match the
+# `luce` alias in ~/.ssh/config.
 name: Deploy
 
 on:
@@ -22,6 +23,11 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+
+env:
+  SSH_HOST: www258.your-server.de
+  SSH_PORT: '22'
+  SSH_USER: tessry
 
 concurrency:
   group: deploy
@@ -91,9 +97,6 @@ jobs:
 
       - name: Upload
         env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
           REMOTE_DIR: ${{ needs.target.outputs.dir }}
         run: |
           # Temp-file + rename so WordPress never loads a half-written PHP file.
@@ -102,7 +105,7 @@ jobs:
           set cmd:fail-exit yes
           set net:max-retries 3
           set xfer:use-temp-file yes
-          set sftp:connect-program "ssh -a -x -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -p ${SSH_PORT:-22}"
+          set sftp:connect-program "ssh -a -x -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -p $SSH_PORT"
           open -u "$SSH_USER", "sftp://$SSH_HOST"
           cd "$REMOTE_DIR"
           mirror -R --delete --no-perms --verbose --exclude-glob .git* --exclude-glob .git*/ lucina-spiza/ lucina-spiza/
@@ -113,16 +116,13 @@ jobs:
       - name: Verify
         env:
           TARGET: ${{ needs.target.outputs.name }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
           REMOTE_DIR: ${{ needs.target.outputs.dir }}
         run: |
           mkdir -p "$RUNNER_TEMP/remote"
           cd "$RUNNER_TEMP/remote"
           lftp <<EOF
           set cmd:fail-exit yes
-          set sftp:connect-program "ssh -a -x -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -p ${SSH_PORT:-22}"
+          set sftp:connect-program "ssh -a -x -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -p $SSH_PORT"
           open -u "$SSH_USER", "sftp://$SSH_HOST"
           cd "$REMOTE_DIR"
           mirror --exclude-glob .git* --exclude-glob .git*/ lucina-spiza/ lucina-spiza/

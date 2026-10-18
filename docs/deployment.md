@@ -36,17 +36,17 @@ Each target is a GitHub **environment** (`staging`, `production`). Adding a
 required reviewer to `production` (Settings → Environments) makes every prod
 deploy wait for a click.
 
-## Secrets
+## Connection and secrets
+
+Host, user and port are plain `env` in the workflow, matching the `luce` alias:
+`www258.your-server.de`, user `tessry`, port `22`.
 
 Repository secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 |---|---|
-| `SSH_HOST` | `HostName` of the `luce` alias |
-| `SSH_PORT` | its `Port` (defaults to 22 if unset) |
-| `SSH_USER` | `tessry` |
 | `SSH_PRIVATE_KEY` | a dedicated deploy key (no passphrase) |
-| `SSH_KNOWN_HOSTS` | the server's host-key line(s); strict checking is on |
+| `SSH_KNOWN_HOSTS` | the server's host-key line(s), from `ssh-keygen -F www258.your-server.de` on a machine that already trusts it; strict checking is on |
 
 Tested against a local SFTP-only, chrooted OpenSSH server: upload, stale-file
 deletion, `.git-bak` preserved, verify fails on a tampered file, wrong host key
