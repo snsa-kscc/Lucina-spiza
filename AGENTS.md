@@ -29,8 +29,9 @@ Checkout Field Editor Pro.
 - **Never modify production** (`/public_html` outside `labouche/`) without
   explicit approval.
 - The `luce` SSH host is **SFTP-only** — `exec request failed` on shell/exec.
-  Deployment = GitHub Actions on push to `main` (staging), or `[ci prod]` in
-  the commit message (production only); see `docs/deployment.md`.
+  Deployment = GitHub Actions: merge to `main` deploys staging; production is
+  promoted with Actions → Deploy → Run workflow (target `production`). See
+  `docs/deployment.md`.
 - **Do not run `git` over SSHFS** on remote checkouts — ownership (remote UID
   1786) and FETCH_HEAD writes fail. The staging mu-plugins dir is no longer a
   git repo anyway; upload changed files and verify with `sha256sum`.

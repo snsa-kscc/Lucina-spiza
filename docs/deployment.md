@@ -4,21 +4,35 @@
 SFTP-only (see `remote-access.md`), so the workflow uses `lftp` over `sftp://`
 — no rsync, no remote git.
 
+## Day-to-day workflow
+
+1. **Change** — PR → merge to `main`. The push deploys to **staging**
+   automatically.
+2. **Test** on labouche.lucinaspiza.com.
+3. **Promote** — GitHub → Actions → **Deploy** → *Run workflow*, branch
+   `main`, target **production**. From a terminal:
+   `gh workflow run deploy.yml -f target=production`.
+   This deploys whatever is on `main` right now; staging is not touched.
+
+Do **not** use an empty `[ci prod]` commit to promote: pushes are filtered by
+path, so a commit that changes no plugin files triggers nothing.
+
 ## Triggers
 
 | Event | Target | Remote dir |
 |---|---|---|
 | Push to `main` | staging | `/public_html/labouche/wp-content/mu-plugins` |
-| Push to `main`, head commit message contains `[ci prod]` | **production only** | `/public_html/wp-content/mu-plugins` |
-| Actions → Deploy → Run workflow | chosen | as above |
+| Actions → Deploy → Run workflow | chosen (staging / production) | as above |
+| Push to `main`, head commit message contains `[ci prod]` | **production only**, staging skipped | `/public_html/wp-content/mu-plugins` |
 
 Pushes run only when `lucina-spiza.php`, `mail-audit.php`, `lucina-spiza/**`
-or the workflow itself changed.
+or the workflow itself changed. Docs-only commits deploy nothing.
 
-`[ci prod]` is read from the **head commit** of the push. When merging a PR
-with a merge commit, the head commit is the merge commit, whose message
-includes the PR title — so put `[ci prod]` in the PR title (or in the squash
-commit title).
+`[ci prod]` is the exception path (e.g. an urgent hotfix straight to
+production). It is read from the **head commit** of the push: with a merge
+commit that is the merge commit, whose message includes the PR title — so put
+`[ci prod]` in the PR title (or the squash commit title). The PR must change
+plugin files or nothing runs.
 
 ## What a run does
 
