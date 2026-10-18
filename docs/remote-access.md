@@ -44,6 +44,8 @@ To fully remove such a dir later:
 
 ## Deploy procedure that works
 
+Normally use CI instead — see `deployment.md`. Manual fallback:
+
 ```bash
 sftp -b - luce <<'EOF'
 put Lucina-spiza/lucina-spiza/checkout-company.php \
