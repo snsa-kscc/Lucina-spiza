@@ -79,10 +79,18 @@ New mu-plugin module `lucina-spiza/eracuni-monitor.php`, loaded from
    links; nothing sent when all is fine. Log every run to WC logs, source
    `lucina-spiza-eracuni-monitor`. Remember alerted order IDs (order meta
    `_lucina_eracuni_alerted`) so an order is reported once.
-5. **Wake-up** — WP-Cron only runs on page visits, and the host is SFTP-only
-   (no crontab). An external pinger (cron-job.org or a Cloudflare Cron
-   Trigger) requests `https://lucinaspiza.com/wp-cron.php` at 04:00 and again
-   ~08:00 as a safety net. Extra pings are harmless — the job runs once/day.
+5. **Wake-up** — WP-Cron only runs on page visits, so something must hit it
+   at 04:00. The host is SFTP-only (no shell crontab), but it is Hetzner web
+   hosting (`/usr/www/users/tessry`) and **konsoleH cron jobs** are available
+   — preferred option: daily 04:00, `php /usr/www/users/tessry/wp-cron.php`
+   (or URL `https://lucinaspiza.com/wp-cron.php`). Check whether konsoleH cron
+   times are local or UTC.
+   The plan has a limited number of cron slots and **one cron job already
+   exists** — find out what it runs before touching it. If it already calls
+   `wp-cron.php` often enough (≤ hourly), no change is needed. Never replace
+   an unrelated job; fallback is an external pinger (cron-job.org /
+   Cloudflare Cron Trigger). Extra triggers are harmless — the job runs
+   once/day.
 
 Not in scope for v1: **auto-resync** (calling `order.synchronize` from the
 job). Enable only after e-Računi confirms a manual sync can't create a
