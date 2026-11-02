@@ -76,3 +76,6 @@ exempts only non-`HR` billing countries.
 - `docs/deployment.md` — CI deploy to staging/production, secrets.
 - `docs/vies-validation-proposal.md` — proposed VIES lookup before granting
   B2B exemption; pending client decision. No code written yet.
+- `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
+  webhooks (200, no sync); incidents #439/#442 and a proposed daily 04:00
+  check. Pending Luce's approval. No code written yet.
