@@ -80,6 +80,9 @@ exempts only non-`HR` billing countries.
 - `docs/deployment.md` — CI deploy to staging/production, secrets.
 - `docs/vies-validation-proposal.md` — proposed VIES lookup before granting
   B2B exemption; pending client decision. No code written yet.
+- `docs/staging-config-diff-handover.md` — **open handover**: staging sends 0% VAT
+  on Google Pay orders (#268/#269) while production is fine; find and align
+  config differences.
 - `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
   webhooks (200, no sync); incidents #439/#442. Daily 04:00 check + auto-resync
   **approved by Luce**; konsoleH cron slot (1 of 1) free. Implementation plan + **handover** inside;
