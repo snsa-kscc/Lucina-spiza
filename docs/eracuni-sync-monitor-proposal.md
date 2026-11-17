@@ -1,7 +1,8 @@
 # e-Računi sync monitor — proposal
 
-Status: **proposal — awaiting client (Luce) approval.** No code written yet.
-Helpdesk ticket about the root cause drafted, not yet sent (see below).
+Status: **approved by Luce** (02.11.2026, confirmed 10.11.2026). No code written yet.
+Helpdesk ticket 259410 sent 02.11; e-Računi's answer (03.11) was wrong and our
+correction is unanswered — see [History](#history).
 
 ## Problem
 
@@ -59,65 +60,118 @@ issued (flag separately). Prefixes `221` = narudžba kupca, `60` = račun are
 observed, not documented — match defensively.
 
 Manual recovery = the meta box **Sinkroniziraj** button, which posts
-`order.synchronize` with the same payload.
+`order.synchronize` with the same payload. Used on #439 and #442 on 02.11.2026
+(3 and 1 days late): both got narudžba kupca + račun, **no duplicates** — the
+original webhooks were never processed late.
 
-## Proposed solution
+## Agreed solution
+
+Agreed with Luce by email (10.11.2026): once a day a job goes through recent
+orders, asks e-Računi what state each one is in, **repairs** what the plugin
+failed to sync, and emails what it fixed or could not fix. Silent when all is
+fine.
 
 New mu-plugin module `lucina-spiza/eracuni-monitor.php`, loaded from
-`lucina-spiza.php`. No new infrastructure.
+`lucina-spiza.php`.
 
 1. **Schedule** — recurring Action Scheduler action, daily at **04:00
    Europe/Zagreb** (`as_schedule_cron_action`; Action Scheduler evaluates cron
    in UTC, so convert explicitly so DST doesn't shift it to 05:00).
 2. **Select** — orders with status `completed`/`processing`, created in the
    last **48 h**, older than **30 min** (webhooks are async; they arrive ~1–2
-   min after payment). Typically 0–5 orders/day → 0–5 API calls.
+   min after payment). 48 h instead of "yesterday" so a failed run is covered
+   by the next one. Typically 0–5 orders/day → 0–5 API calls.
 3. **Check** — `order.refresh` per order, apply the rule above. If the API
    call itself fails (timeout/no response — happened 06.10, 12.10, 25.10),
-   report as *unknown*, not as missing.
-4. **Alert** — one email (`wp_mail`) listing missing orders with admin edit
-   links; nothing sent when all is fine. Log every run to WC logs, source
-   `lucina-spiza-eracuni-monitor`. Remember alerted order IDs (order meta
-   `_lucina_eracuni_alerted`) so an order is reported once.
-5. **Wake-up** — WP-Cron only runs on page visits, so something must hit it
-   at 04:00. The host is SFTP-only (no shell crontab), but it is Hetzner web
-   hosting (`/usr/www/users/tessry`) and **konsoleH cron jobs** are available
-   — preferred option: daily 04:00, `php /usr/www/users/tessry/wp-cron.php`
-   (or URL `https://lucinaspiza.com/wp-cron.php`). Check whether konsoleH cron
-   times are local or UTC.
-   The plan has a limited number of cron slots and **one cron job already
-   exists** — find out what it runs before touching it. If it already calls
-   `wp-cron.php` often enough (≤ hourly), no change is needed. Never replace
-   an unrelated job; fallback is an external pinger (cron-job.org /
-   Cloudflare Cron Trigger). Extra triggers are harmless — the job runs
-   once/day.
+   report as *unknown* and retry next run; never resync on an unknown.
+4. **Repair** — for orders confirmed missing: `order.synchronize` (same call
+   as the Sinkroniziraj button), then `order.refresh` again to verify a
+   `documentID` now exists. One attempt per order per run; after **2 failed
+   runs** stop retrying and only alert. Justification for enabling this in v1:
+   the helpdesk will not answer the duplicate question, and the manual syncs of
+   #439/#442 produced no duplicates.
+5. **Alert** — one email (`wp_mail`) per run, only when something happened:
+   *fixed* (order, document numbers created), *could not fix* (error from
+   e-Računi), *unknown* (API unreachable), and *synced but no račun* (secondary
+   signal). Admin edit links per order. Log every run to WC logs, source
+   `lucina-spiza-eracuni-monitor`. Order meta `_lucina_eracuni_monitor`
+   (attempts, last result) so an order is reported once per outcome.
+   Recipients: **infobarbioza@gmail.com** (Luce) + **sinisa@dvasadva.com**.
+6. **Wake-up** — WP-Cron only runs on page visits, so a konsoleH cron job
+   triggers it (see below). Extra triggers are harmless — Action Scheduler
+   runs the action once per day.
 
-Not in scope for v1: **auto-resync** (calling `order.synchronize` from the
-job). Enable only after e-Računi confirms a manual sync can't create a
-duplicate if the original request is processed late.
+Kill switch: constant `LUCINA_ERACUNI_MONITOR_REPAIR` (default `true`);
+`false` = detect and alert only.
 
-### Open decisions for Luce
+### konsoleH cron (checked 17.11.2026)
 
-- Alert recipients: Siniša only, or Siniša + Luce?
-- Approve the work (estimate **~3 h**: module ~1.5 h, staging test ~1 h,
-  pinger + production promotion ~0.5 h).
-- Later: auto-resync yes/no (after helpdesk answer).
+konsoleH access enabled by Luce; Cron job Manager is at
+`https://konsoleh.your-server.de/webhostings/A0388192326/cronjobs` (server
+`9eos.your-vhost.de`).
+
+- **0 of 1 slots used** — the plan allows exactly **one** cron job, and none
+  exists. (Earlier note that "one job already exists" was wrong.)
+- Jobs take an **absolute script path**, not a URL. The interpreter can be
+  chosen, or the script must be executable (≥ 705).
+- Runtime: interval preset, crontab freetext, or manual. Intervals under 2 h
+  must be **exclusive execution** (checkbox, on by default). Minimum interval is
+  1 min.
+- Output goes by mail to `webmaster@9eos.your-vhost.de` unless the
+  *Mail notification to* field / `MAILTO` line in Advanced View says
+  otherwise. Set `MAILTO=""` — our own alert email covers failures.
+- Server timezone is not shown. **It doesn't matter:** the cron only wakes
+  WP-Cron; the 04:00 Zagreb time is set in Action Scheduler.
+- Server paths: SFTP `/public_html` = `/usr/www/users/tessry` (seen in
+  WC fatal logs). Production: `/usr/www/users/tessry/wp-cron.php`, staging:
+  `/usr/www/users/tessry/labouche/wp-cron.php`.
+
+Plan for the single slot: **PHP interpreter →
+`/usr/www/users/tessry/wp-cron.php`, every 15 min, exclusive.** This also
+makes all other WP-Cron / Action Scheduler work (Woo emails, Stripe, scheduled
+sales) run on time at night instead of waiting for a visitor. Production only:
+staging stays on visit-triggered WP-Cron, and the monitor is tested there by
+running the action manually (Tools → Scheduled Actions → Run).
+
+Not needed: `DISABLE_WP_CRON` (visits may keep triggering it; harmless).
+
+### Budget
+
+Quoted to Luce 10.11: **3 h total for the monitor and the Black Friday
+campaign** (23.–29.11, set + revert prices). Monitor share ≈ 2 h: module ~1.25
+h, staging test ~0.5 h, konsoleH cron + production promotion ~0.25 h.
 
 ### Testing
 
 Staging (labouche) — **check first** whether staging's Eurofaktura plugin is
 connected to e-Računi at all. There is only one shop in e-Računi
 (`https://lucinaspiza.com`); a connected staging must not push test orders into
-the real books. If staging is not connected, test the detection logic with a
-filter that stubs the `order.refresh` response (synced / dropped / API error),
-then do a dry run on production that only logs (no email) for a few days before
-enabling the email.
+the real books. Test the detection and repair logic with a filter that stubs
+the `order.refresh` / `order.synchronize` responses (synced / dropped /
+repaired / repair fails / API error). On production, run a few days with
+`LUCINA_ERACUNI_MONITOR_REPAIR = false` (alerts only), then enable repair.
 
-## Pending actions (not done)
+## History
 
-- Helpdesk email drafted in Gmail (sinisa@dvasadva.com) to
-  `helpdesk@e-racuni.com` with both incidents and delivery IDs. Earlier ticket
-  went to `helpdesk@e-racuni.hr` — consider using that address.
-- Email to Luce drafted (infobarbioza@gmail.com) asking how to proceed.
-- #439 and #442 still unsynced — press **Sinkroniziraj** after the helpdesk
-  answer (or Luce issues invoices manually).
+- **02.11.2026** — Siniša told Luce about #439/#442. Luce: send the helpdesk
+  email with her in CC (written record in case Porezna asks why some invoices
+  aren't issued automatically), and go ahead with monitoring.
+- **02.11** — accounting told **not to issue invoices for web orders by hand**:
+  the shop creates narudžba kupca first and the račun from it; manual invoices
+  break the sequence and analytics.
+- **02.11** — ticket sent to `helpdesk@e-racuni.hr` (ticket **259410**), Luce
+  in CC. #439 and #442 synced manually via Sinkroniziraj at end of day.
+- **03.11** — helpdesk (Nejra) replied that both orders had synced fine, based
+  on log entries that came from the manual sync. Siniša corrected this the same
+  day with timestamps and repeated the three questions. **No answer since**;
+  not expected.
+- **10.11** — approach above proposed to Luce and accepted; alerts to her
+  address.
+- **12.11** — Hetzner admin login now requires an email OTP sent to Luce.
+- **17.11** — konsoleH access enabled; Cron job Manager checked (above).
+
+## Still open
+
+- Unrelated: `checkout-company.php:96` fatal (`get_billing_company()` on
+  null from the Stripe checkout-sessions AJAX handler) still occurs — seen again
+  in the 17.11.2026 fatal log. Separate fix.

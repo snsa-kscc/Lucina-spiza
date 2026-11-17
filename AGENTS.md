@@ -77,5 +77,5 @@ exempts only non-`HR` billing countries.
 - `docs/vies-validation-proposal.md` — proposed VIES lookup before granting
   B2B exemption; pending client decision. No code written yet.
 - `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
-  webhooks (200, no sync); incidents #439/#442 and a proposed daily 04:00
-  check. Pending Luce's approval. No code written yet.
+  webhooks (200, no sync); incidents #439/#442. Daily 04:00 check + auto-resync
+  **approved by Luce**; konsoleH cron slot (1 of 1) free. No code written yet.
