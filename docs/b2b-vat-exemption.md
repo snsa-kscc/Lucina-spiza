@@ -53,7 +53,32 @@ taxable.
 - Verified: remote SHA-256 `a06a607bb0604297f1979b34bcdc1a301e22c761ab34372193c6a0feb8f77242`
   matches the repo file.
 
-## Still to verify on labouche
+## Deployment to production (17.11.2026)
+
+Production kept the 28.08 "Initial commit" version of `checkout-company.php`
+(`3b7ad51`, SHA-256 `90157315a83d…`) until 17.11.2026 — PR #1 had only ever
+gone to staging. All other mu-plugin files already matched `main`.
+
+- Synced to `main` via Actions → Deploy → `production`
+  ([run 44192291555](https://github.com/snsa-kscc/Lucina-spiza/actions/runs/44192291555)),
+  verified SHA-256 `a06a607bb060…`.
+- Then PR #3 (Stripe metadata fatal fix, below) was tested on staging and
+  promoted ([run 44197411722](https://github.com/snsa-kscc/Lucina-spiza/actions/runs/44197411722)).
+  Repo, staging and production all at `84a5f3291271…`.
+- **B2B sales are currently paused** (problems with e-Računi), so the exemption
+  logic is live but unused. The live checkout tests below were not run.
+
+### Related: Stripe metadata fatal (PR #3)
+
+The `wc_stripe_payment_metadata` filter in `checkout-company.php` called
+`$order->get_billing_company()`, but Stripe's Checkout Sessions AJAX
+(`wc_stripe_create_checkout_session`) applies that filter with a `null`
+order → fatal ~70× between 18.10 and 17.11.2026, on ordinary consumer
+checkouts too. Fixed by returning the metadata unchanged when the order isn't a
+`WC_Order`. Staging test orders #267 (card), #268 and #269 (Google Pay): no
+new fatal.
+
+## Still to verify on labouche (when B2B resumes)
 
 Live checkout tests: EU B2B valid VAT → 0 tax; HR company → 25%; non-EU
 company → 0; EU consumer → 25%; invalid VAT → taxed; non-EU consumer → no tax

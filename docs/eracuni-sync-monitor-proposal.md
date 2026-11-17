@@ -309,6 +309,12 @@ State at handover:
 
 ## Still open
 
-- Unrelated: `checkout-company.php:96` fatal (`get_billing_company()` on
-  null from the Stripe checkout-sessions AJAX handler) still occurs — seen again
-  in the 17.11.2026 fatal log. Separate fix.
+- ~~`checkout-company.php` Stripe metadata fatal~~ — fixed in PR #3, on
+  production since 17.11.2026 (see `b2b-vat-exemption.md`). Check the
+  18.11 production fatal log stays clean.
+- Staging test orders #268, #269 (Google Pay, billing country US) got no
+  invoice in the **staging** e-Računi company (`H6d/WebShopSynch-16FC074D…`,
+  separate from production `H7e/…`). Webhooks answered 200. Check staging's
+  Dnevnik sinkronizacije: an error entry ⇒ staging config (non-EU consumer /
+  US mapping, sale type 120); no entry ⇒ the silent drop reproduced — useful
+  for the helpdesk and for testing the monitor.
