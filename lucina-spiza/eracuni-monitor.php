@@ -1,0 +1,476 @@
+<?php
+/**
+ * e-Računi sync monitor.
+ *
+ * e-Računi sometimes answers an order webhook with HTTP 200 and then never
+ * imports the order (#439, #442). Once a day this module looks up recent
+ * orders through the e-Računi API, optionally re-sends missing ones through the
+ * Eurofaktura plugin's own "Sinkroniziraj" call, and emails a report when
+ * something needs attention. Silent when everything is fine.
+ *
+ * Config (wp-config.php, never the repo):
+ *   LUCINA_ERACUNI_API_URL        e.g. https://e-racuni.com/WebServicesHR/API
+ *   LUCINA_ERACUNI_API_USER       API user
+ *   LUCINA_ERACUNI_API_SECRET     API user's secret key
+ *   LUCINA_ERACUNI_API_TOKEN      organization token
+ *   LUCINA_ERACUNI_MONITOR_REPAIR true = resync missing orders (default false)
+ *
+ * The module does nothing unless the API constants are defined.
+ *
+ * See docs/eracuni-sync-monitor-proposal.md.
+ *
+ * @package LucinaSpiza
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+const LUCINA_ERACUNI_MONITOR_HOOK  = 'lucina_eracuni_monitor_run';
+const LUCINA_ERACUNI_MONITOR_GROUP = 'lucina-spiza';
+const LUCINA_ERACUNI_MONITOR_META  = '_lucina_eracuni_monitor';
+const LUCINA_ERACUNI_MONITOR_LOG   = 'lucina-spiza-eracuni-monitor';
+
+/** Run time, Europe/Zagreb. */
+const LUCINA_ERACUNI_MONITOR_AT = '04:00';
+
+/** Order window: created between 48 h and 30 min ago. */
+const LUCINA_ERACUNI_MONITOR_WINDOW = 172800; // 48 h.
+const LUCINA_ERACUNI_MONITOR_GRACE  = 1800;   // 30 min.
+
+/** Stop resyncing an order after this many failed repair runs. */
+const LUCINA_ERACUNI_MONITOR_MAX_REPAIRS = 2;
+
+/**
+ * Whether the monitor is configured on this site.
+ */
+function lucina_eracuni_monitor_enabled() {
+	return defined( 'LUCINA_ERACUNI_API_URL' )
+		&& defined( 'LUCINA_ERACUNI_API_USER' )
+		&& defined( 'LUCINA_ERACUNI_API_SECRET' )
+		&& defined( 'LUCINA_ERACUNI_API_TOKEN' );
+}
+
+/**
+ * Whether missing orders may be resynced through the Eurofaktura plugin.
+ */
+function lucina_eracuni_monitor_repair_enabled() {
+	return defined( 'LUCINA_ERACUNI_MONITOR_REPAIR' ) && true === LUCINA_ERACUNI_MONITOR_REPAIR
+		&& function_exists( 'eurofaktura_map_order_for_request' )
+		&& class_exists( 'Eurofaktura_http_client' )
+		&& get_option( 'eurofaktura_connected' );
+}
+
+function lucina_eracuni_monitor_log( $level, $message ) {
+	if ( function_exists( 'wc_get_logger' ) ) {
+		wc_get_logger()->log( $level, $message, array( 'source' => LUCINA_ERACUNI_MONITOR_LOG ) );
+	}
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Schedule: one pending single action at the next 04:00 Europe/Zagreb. Each run
+ * schedules the following one; init re-creates it if it went missing. Computing
+ * the timestamp in Europe/Zagreb keeps it at 04:00 across DST changes.
+ * ---------------------------------------------------------------------------
+ */
+
+function lucina_eracuni_monitor_next_run( $now = null ) {
+	$tz   = new DateTimeZone( 'Europe/Zagreb' );
+	$now  = $now ? $now : time();
+	$next = new DateTimeImmutable( 'today ' . LUCINA_ERACUNI_MONITOR_AT, $tz );
+
+	if ( $next->getTimestamp() <= $now + MINUTE_IN_SECONDS ) {
+		$next = new DateTimeImmutable( 'tomorrow ' . LUCINA_ERACUNI_MONITOR_AT, $tz );
+	}
+
+	return $next->getTimestamp();
+}
+
+function lucina_eracuni_monitor_schedule() {
+	if ( ! function_exists( 'as_next_scheduled_action' ) ) {
+		return;
+	}
+
+	if ( ! lucina_eracuni_monitor_enabled() ) {
+		as_unschedule_all_actions( LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+		return;
+	}
+
+	if ( false === as_next_scheduled_action( LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP ) ) {
+		as_schedule_single_action( lucina_eracuni_monitor_next_run(), LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+	}
+}
+add_action( 'action_scheduler_init', 'lucina_eracuni_monitor_schedule' );
+
+add_action(
+	LUCINA_ERACUNI_MONITOR_HOOK,
+	function () {
+		try {
+			lucina_eracuni_monitor_run();
+		} finally {
+			// Always line up tomorrow's run, even if this one threw. The current
+			// action is "in-progress", so as_next_scheduled_action() would see it;
+			// schedule directly instead.
+			if ( lucina_eracuni_monitor_enabled() && function_exists( 'as_schedule_single_action' ) ) {
+				as_schedule_single_action( lucina_eracuni_monitor_next_run(), LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+			}
+		}
+	}
+);
+
+/*
+ * ---------------------------------------------------------------------------
+ * e-Računi API
+ * ---------------------------------------------------------------------------
+ */
+
+/**
+ * Call an e-Računi API method.
+ *
+ * @return array|WP_Error The `result` array on success.
+ */
+function lucina_eracuni_api( $method, array $parameters ) {
+	/**
+	 * Stub API responses for testing. Return an array (the `result`) or a
+	 * WP_Error to skip the HTTP call.
+	 */
+	$stub = apply_filters( 'lucina_eracuni_monitor_response', null, $method, $parameters );
+	if ( null !== $stub ) {
+		return $stub;
+	}
+
+	$response = wp_remote_post(
+		LUCINA_ERACUNI_API_URL,
+		array(
+			'timeout' => 30,
+			'headers' => array( 'Content-Type' => 'application/json' ),
+			'body'    => wp_json_encode(
+				array(
+					'username'   => LUCINA_ERACUNI_API_USER,
+					'secretKey'  => LUCINA_ERACUNI_API_SECRET,
+					'token'      => LUCINA_ERACUNI_API_TOKEN,
+					'method'     => $method,
+					'parameters' => (object) $parameters,
+				)
+			),
+		)
+	);
+
+	if ( is_wp_error( $response ) ) {
+		return $response;
+	}
+
+	$code = wp_remote_retrieve_response_code( $response );
+	$body = json_decode( wp_remote_retrieve_body( $response ), true );
+	$data = is_array( $body ) && isset( $body['response'] ) ? $body['response'] : null;
+
+	if ( 200 !== $code || ! is_array( $data ) || 'ok' !== ( $data['status'] ?? '' ) || ! isset( $data['result'] ) || ! is_array( $data['result'] ) ) {
+		$why = is_array( $data ) && ! empty( $data['description'] ) ? $data['description'] : 'neočekivan odgovor';
+		return new WP_Error( 'lucina_eracuni_api', sprintf( '%s: HTTP %d, %s', $method, $code, $why ) );
+	}
+
+	return $data['result'];
+}
+
+/**
+ * Look up sales orders (narudžbe kupca) by Woo order number.
+ *
+ * @param string[] $numbers Woo order numbers.
+ * @return array|WP_Error number => SalesOrder.
+ */
+function lucina_eracuni_monitor_fetch( array $numbers ) {
+	$found = array();
+
+	foreach ( array_chunk( $numbers, 100 ) as $i => $chunk ) {
+		if ( $i > 0 ) {
+			sleep( 2 ); // API allows ~1 request/s, no concurrency.
+		}
+
+		$result = lucina_eracuni_api( 'SalesOrderList', array( 'number' => implode( ',', $chunk ) ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		foreach ( $result as $sales_order ) {
+			if ( isset( $sales_order['number'] ) ) {
+				$found[ (string) $sales_order['number'] ] = $sales_order;
+			}
+		}
+	}
+
+	return $found;
+}
+
+/**
+ * Classify one order from its e-Računi sales order (or null if absent).
+ *
+ * @return string synced | synced_no_invoice | needs_correction | missing
+ */
+function lucina_eracuni_monitor_classify( $sales_order ) {
+	if ( ! $sales_order ) {
+		return 'missing';
+	}
+	if ( 'CorrectionPending' === ( $sales_order['status'] ?? '' ) ) {
+		return 'needs_correction';
+	}
+	if ( empty( $sales_order['salesInvoiceRef'] ) && empty( $sales_order['salesInvoicesRef'] ) ) {
+		return 'synced_no_invoice';
+	}
+	return 'synced';
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Run
+ * ---------------------------------------------------------------------------
+ */
+
+/**
+ * Orders to check: paid, non-zero, created 48 h … 30 min ago.
+ *
+ * @return WC_Order[]
+ */
+function lucina_eracuni_monitor_orders( $now = null ) {
+	$now = $now ? $now : time();
+
+	$orders = wc_get_orders(
+		array(
+			'status'       => array( 'processing', 'completed' ),
+			'date_created' => ( $now - LUCINA_ERACUNI_MONITOR_WINDOW ) . '...' . ( $now - LUCINA_ERACUNI_MONITOR_GRACE ),
+			'limit'        => -1,
+			'type'         => 'shop_order',
+		)
+	);
+
+	return array_values(
+		array_filter(
+			$orders,
+			function ( $order ) {
+				return (float) $order->get_total() > 0;
+			}
+		)
+	);
+}
+
+/**
+ * Re-send an order through the Eurofaktura plugin (the "Sinkroniziraj" button).
+ *
+ * @return true|string True on success, otherwise the error text.
+ */
+function lucina_eracuni_monitor_resync( WC_Order $order ) {
+	$response = Eurofaktura_http_client::instance()->post_request( 'order.synchronize', eurofaktura_map_order_for_request( $order ), 30 );
+
+	if ( null === $response ) {
+		return 'e-Računi se nije javio (timeout)';
+	}
+
+	$status = method_exists( $response, 'getStatusCode' ) ? (int) $response->getStatusCode() : 0;
+	if ( 200 !== $status ) {
+		$body = method_exists( $response, 'getBody' ) ? (string) $response->getBody() : '';
+		return sprintf( 'HTTP %d %s', $status, wp_strip_all_tags( substr( $body, 0, 300 ) ) );
+	}
+
+	return true;
+}
+
+/**
+ * The daily job. Returns the per-order results (also useful when run by hand).
+ */
+function lucina_eracuni_monitor_run() {
+	if ( ! lucina_eracuni_monitor_enabled() || ! function_exists( 'wc_get_orders' ) ) {
+		return array();
+	}
+
+	$orders = lucina_eracuni_monitor_orders();
+	if ( ! $orders ) {
+		lucina_eracuni_monitor_log( 'info', 'Nema narudžbi za provjeru.' );
+		return array();
+	}
+
+	$by_number = array();
+	foreach ( $orders as $order ) {
+		$by_number[ (string) $order->get_order_number() ] = $order;
+	}
+
+	$found   = lucina_eracuni_monitor_fetch( array_map( 'strval', array_keys( $by_number ) ) );
+	$results = array();
+
+	foreach ( $by_number as $number => $order ) {
+		$state = is_array( $order->get_meta( LUCINA_ERACUNI_MONITOR_META ) ) ? $order->get_meta( LUCINA_ERACUNI_MONITOR_META ) : array();
+
+		$result = array(
+			'order'    => $order,
+			'number'   => (string) $number,
+			'previous' => $state['outcome'] ?? '',
+			'repairs'  => (int) ( $state['repairs'] ?? 0 ),
+			'detail'   => '',
+		);
+
+		if ( is_wp_error( $found ) ) {
+			$result['outcome'] = 'unknown';
+			$result['detail']  = $found->get_error_message();
+		} else {
+			$sales_order       = $found[ $result['number'] ] ?? null;
+			$result['outcome'] = lucina_eracuni_monitor_classify( $sales_order );
+			$result['detail']  = lucina_eracuni_monitor_detail( $sales_order );
+		}
+
+		$results[ $result['number'] ] = $result;
+	}
+
+	// Repair: resync missing orders, then look them up again.
+	if ( lucina_eracuni_monitor_repair_enabled() ) {
+		$resynced = array();
+
+		foreach ( $results as $number => $result ) {
+			if ( 'missing' !== $result['outcome'] || $result['repairs'] >= LUCINA_ERACUNI_MONITOR_MAX_REPAIRS ) {
+				continue;
+			}
+
+			$ok = lucina_eracuni_monitor_resync( $result['order'] );
+			++$results[ $number ]['repairs'];
+
+			if ( true === $ok ) {
+				$resynced[] = $number;
+			} else {
+				$results[ $number ]['outcome'] = 'repair_failed';
+				$results[ $number ]['detail']  = $ok;
+			}
+		}
+
+		if ( $resynced ) {
+			sleep( 5 );
+			$again = lucina_eracuni_monitor_fetch( $resynced );
+
+			foreach ( $resynced as $number ) {
+				if ( is_wp_error( $again ) ) {
+					$results[ $number ]['outcome'] = 'repair_unverified';
+					$results[ $number ]['detail']  = $again->get_error_message();
+					continue;
+				}
+
+				$sales_order = $again[ $number ] ?? null;
+				$outcome     = lucina_eracuni_monitor_classify( $sales_order );
+
+				$results[ $number ]['outcome'] = 'missing' === $outcome ? 'repair_failed' : 'repaired';
+				$results[ $number ]['detail']  = 'missing' === $outcome
+					? 'nakon ponovne sinkronizacije narudžba kupca i dalje ne postoji'
+					: lucina_eracuni_monitor_detail( $sales_order ) . ( 'synced' === $outcome ? '' : ' — ' . lucina_eracuni_monitor_label( $outcome ) );
+			}
+		}
+	}
+
+	// Persist state and decide what to report (each order once per outcome).
+	$report = array();
+	foreach ( $results as $number => $result ) {
+		$order = $result['order'];
+		$order->update_meta_data(
+			LUCINA_ERACUNI_MONITOR_META,
+			array(
+				'outcome' => $result['outcome'],
+				'repairs' => $result['repairs'],
+				'checked' => time(),
+			)
+		);
+		$order->save_meta_data();
+
+		$changed  = $result['outcome'] !== $result['previous'];
+		$resolved = 'synced' === $result['outcome'] && '' !== $result['previous'] && 'synced' !== $result['previous'];
+
+		if ( $changed && ( 'synced' !== $result['outcome'] || $resolved ) ) {
+			$report[] = $result;
+		}
+
+		lucina_eracuni_monitor_log(
+			'synced' === $result['outcome'] ? 'info' : 'warning',
+			sprintf( '#%s (ID %d): %s %s', $number, $order->get_id(), $result['outcome'], $result['detail'] )
+		);
+	}
+
+	if ( $report ) {
+		lucina_eracuni_monitor_email( $report );
+	}
+
+	return $results;
+}
+
+function lucina_eracuni_monitor_detail( $sales_order ) {
+	if ( ! $sales_order ) {
+		return '';
+	}
+
+	$parts = array( 'narudžba kupca ' . ( $sales_order['number'] ?? '?' ) );
+
+	$invoice = $sales_order['salesInvoicesRef'] ?? ( $sales_order['salesInvoiceRef'] ?? '' );
+	if ( $invoice ) {
+		$parts[] = 'račun ' . $invoice;
+	}
+	if ( 'CorrectionPending' === ( $sales_order['status'] ?? '' ) && ! empty( $sales_order['remarks'] ) ) {
+		$parts[] = trim( preg_replace( '/\s+/', ' ', $sales_order['remarks'] ) );
+	}
+
+	return implode( ', ', $parts );
+}
+
+function lucina_eracuni_monitor_label( $outcome ) {
+	$labels = array(
+		'synced'            => 'Riješeno — narudžba i račun postoje',
+		'synced_no_invoice' => 'Narudžba kupca postoji, ali račun nije izdan',
+		'needs_correction'  => 'e-Računi traži ispravak narudžbe (račun nije izdan)',
+		'missing'           => 'Narudžba ne postoji u e-Računima',
+		'repaired'          => 'Popravljeno — ponovno sinkronizirano',
+		'repair_failed'     => 'Ponovna sinkronizacija nije uspjela',
+		'repair_unverified' => 'Ponovno sinkronizirano, ali provjera nije uspjela',
+		'unknown'           => 'Provjera nije uspjela (e-Računi API nedostupan) — ponovit će se sutra',
+	);
+
+	return $labels[ $outcome ] ?? $outcome;
+}
+
+/**
+ * Alert recipients. Luce only gets production alerts.
+ */
+function lucina_eracuni_monitor_recipients() {
+	$recipients = array( 'sinisa@dvasadva.com' );
+
+	if ( 'lucinaspiza.com' === wp_parse_url( home_url(), PHP_URL_HOST ) ) {
+		$recipients[] = 'infobarbioza@gmail.com';
+	}
+
+	return apply_filters( 'lucina_eracuni_monitor_recipients', $recipients );
+}
+
+function lucina_eracuni_monitor_email( array $report ) {
+	$site  = wp_parse_url( home_url(), PHP_URL_HOST );
+	$lines = array(
+		'Dnevna provjera sinkronizacije narudžbi s e-Računima (' . $site . ').',
+		'',
+	);
+
+	foreach ( $report as $result ) {
+		$order   = $result['order'];
+		$lines[] = sprintf( 'Narudžba #%s — %s, %s %s', $result['number'], $order->get_date_created() ? $order->get_date_created()->date_i18n( 'd.m.Y. H:i' ) : '', $order->get_total(), $order->get_currency() );
+		$lines[] = '  ' . lucina_eracuni_monitor_label( $result['outcome'] );
+		if ( $result['detail'] ) {
+			$lines[] = '  ' . $result['detail'];
+		}
+		if ( 'missing' === $result['outcome'] ) {
+			$lines[] = '  Ručno: otvori narudžbu i u okviru e-Računi klikni "Sinkroniziraj". Ne izdavati račun ručno.';
+		}
+		$lines[] = '  ' . $order->get_edit_order_url();
+		$lines[] = '';
+	}
+
+	$lines[] = 'Automatska poruka, šalje se samo kad nešto treba pažnju.';
+
+	$sent = wp_mail(
+		lucina_eracuni_monitor_recipients(),
+		sprintf( '[%s] e-Računi: %d narudžbi treba pažnju', $site, count( $report ) ),
+		implode( "\n", $lines )
+	);
+
+	if ( ! $sent ) {
+		lucina_eracuni_monitor_log( 'error', 'Slanje izvještaja e-poštom nije uspjelo.' );
+	}
+}
