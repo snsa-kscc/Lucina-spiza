@@ -159,6 +159,12 @@ add_action(
 add_filter(
 	'wc_stripe_payment_metadata',
 	function ( $metadata, $order ) {
+		// Stripe's Checkout Sessions AJAX (wc_stripe_create_checkout_session) runs
+		// this filter before an order exists and passes null.
+		if ( ! $order instanceof WC_Order ) {
+			return $metadata;
+		}
+
 		if ( '' !== trim( $metadata['customer_name'] ?? '' ) ) {
 			return $metadata;
 		}
