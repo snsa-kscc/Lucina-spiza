@@ -151,6 +151,124 @@ the `order.refresh` / `order.synchronize` responses (synced / dropped /
 repaired / repair fails / API error). On production, run a few days with
 `LUCINA_ERACUNI_MONITOR_REPAIR = false` (alerts only), then enable repair.
 
+## Implementation plan (17.11.2026)
+
+### Eurofaktura plugin internals (read from production, v1.1.9)
+
+- `includes/class-eurofaktura-http-client.php` —
+  `Eurofaktura_http_client::instance()->post_request($action, $contents, $timeout = 8)`.
+  Guzzle, action in header `X-Eurofaktura-Webhook-Action`. Returns the
+  response, the **error response** on 4xx/5xx, or **`null`** on
+  connect/timeout (logged via `eurofaktura_add_log_error`). Not `wp_remote_*`,
+  so our `http_request_args` filter in `eracuni.php` doesn't touch it.
+- `includes/eurofaktura-order-functions.php:24` —
+  `eurofaktura_map_order_for_request($order)` builds the payload.
+- `includes/admin/order-edit/class-eurofaktura-admin-order-meta-box.php`
+  - `:174` `order.refresh` → 200 + `data.metaData[]` (`documentID`, `title`,
+    `actionsLine1Message`, `actionsLine1[]`); else `message`.
+  - `:293` `order.synchronize` → 200 with `status` (`orderSynchronizeWarning`
+    = warning, otherwise success) and `message`.
+- Plugin is connected when `get_option('eurofaktura_connected')`.
+
+### e-Računi API (NEW — to be researched)
+
+e-Računi has its own API and we have access (Siniša, 17.11). Nothing documented
+here yet. Intended use:
+
+- **Check** via the e-Računi API instead of `order.refresh`: one list call per
+  run (sales orders + invoices for the window), matched to Woo order numbers.
+  Independent of the plugin/webhook path that is failing; gives real račun
+  numbers instead of the observed `60:` prefix; makes a backfill cheap.
+- **Repair stays on the plugin's `order.synchronize`** (the Sinkroniziraj
+  path, proven on #439/#442). Do **not** create documents directly through the
+  API — that bypasses the shop flow (narudžba kupca → račun) and breaks
+  numbering/analytics.
+- To find out: endpoint, auth (user / key / token; enabled on BASIC?), method
+  names to list sales orders and invoices by date, which field carries the
+  Woo order number, rate limits. Validate response shape against #441 (synced
+  normally) and #439 (synced manually 02.11).
+- Credentials: constants in production `wp-config.php` — **never** in the repo
+  or chat. Uploading wp-config is a production change → needs Siniša's
+  approval (or he adds it himself).
+
+### Module `lucina-spiza/eracuni-monitor.php`
+
+Register it in the module list in `lucina-spiza.php`.
+
+- **Guards:** no-op unless Eurofaktura functions exist, `eurofaktura_connected`,
+  and host is `lucinaspiza.com` (staging can never touch the real books;
+  filter to override for stubbed tests).
+- **Schedule:** single Action Scheduler action at the next 04:00
+  Europe/Zagreb (compute with `DateTimeZone('Europe/Zagreb')`); each run
+  schedules the next; on init re-create if none pending. Avoids UTC/DST issues
+  of cron expressions.
+- **Select:** `processing`/`completed`, created 48 h … 30 min ago.
+  Skip orders with total 0 (proposed — confirm).
+- **Classify:** `synced`, `synced_no_invoice`, `missing`, `unknown`.
+  API failure / non-200 / `null` → `unknown`, never `missing`.
+- **Repair** (`missing` only, when `LUCINA_ERACUNI_MONITOR_REPAIR` is true):
+  `order.synchronize` with a longer timeout (~30 s), then re-check. Order meta
+  `_lucina_eracuni_monitor` = attempts + last outcome; give up after 2 runs.
+- **Alert:** plain-text `wp_mail` in Croatian to infobarbioza@gmail.com +
+  sinisa@dvasadva.com, only on a new outcome per order; admin edit links.
+- **Log:** `wc_get_logger()`, source `lucina-spiza-eracuni-monitor`.
+- **Test hook:** filter `lucina_eracuni_monitor_response` to stub API responses
+  (synced / dropped / repair OK / repair fails / API down).
+
+### Rollout
+
+1. Branch + PR; CI runs `php -l` (PHP 8.2).
+2. Merge → staging deploy. Test with stubs; run the action manually from
+   Tools → Scheduled Actions; check classification, email, dedup, log.
+3. Production: Actions → Deploy → `production`, `REPAIR = false` (alerts
+   only). konsoleH cron: interpreter PHP (8.2), script
+   `/usr/www/users/tessry/wp-cron.php`, freetext `*/15 * * * *`, exclusive on,
+   Advanced View `MAILTO=""`. Next day confirm the 04:00 run in Scheduled
+   Actions + WC log.
+4. After 3–4 clean days enable repair (one-line commit, `[ci prod]` or
+   workflow dispatch).
+5. Optional one-off backfill, report-only, orders since 01.10.2026.
+
+Black Friday price change (23.–29.11: 55→39,99, 99→69,99, 149→99,99) is part
+of the same 3 h budget but needs no code — tracked separately.
+
+### Decisions pending from Siniša
+
+1. Alerts-only first, then repair? (recommended: yes)
+2. Skip €0 orders? (recommended: yes)
+3. Alert email in Croatian? (recommended: yes)
+4. Backfill to 01.10? (recommended: yes, report-only)
+
+## Handover (17.11.2026)
+
+Next session runs with Code Mode **off** (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=0
+claude --chrome`) so it can use the browser for the e-Računi API docs and
+konsoleH.
+
+Start here:
+
+1. Read this file and `AGENTS.md`.
+2. With Siniša, open the e-Računi API documentation and fill in the
+   *e-Računi API* section above (endpoint, auth, list methods, order-number
+   field). Make a read-only test call for #441 and #439.
+3. Get answers to *Decisions pending*.
+4. Implement the module on a branch, open a PR, then follow *Rollout*.
+
+State at handover:
+
+- Doc commits on `main`: `bc7c442` (approval, konsoleH findings) + this one.
+  No module code yet; no branch.
+- konsoleH: logged in by Siniša in his browser; cron slot empty (0 of 1).
+- Eurofaktura plugin copy for reading (not part of the repo):
+  `/tmp/claude-1000/-home-snsa-Work-Lucina-spiza/79202c6f-5c87-462b-a391-69db6a0057db/scratchpad/eurofaktura/`
+  — may be gone after reboot; re-download with
+  `sftp luce` → `get -r /public_html/wp-content/plugins/eurofaktura`.
+- Remote SSHFS mount `remote/` was not mounted this session; SFTP via the
+  `luce` alias works.
+- Email context: Gmail threads "e-racuni ne sinkronizira neke narudzbe",
+  "[e-racuni.hr ticket 259410]", "black friday", "Your Hetzner Verification
+  Code" (sinisa@dvasadva.com).
+
 ## History
 
 - **02.11.2026** — Siniša told Luce about #439/#442. Luce: send the helpdesk

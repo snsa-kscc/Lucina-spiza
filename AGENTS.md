@@ -78,4 +78,5 @@ exempts only non-`HR` billing countries.
   B2B exemption; pending client decision. No code written yet.
 - `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
   webhooks (200, no sync); incidents #439/#442. Daily 04:00 check + auto-resync
-  **approved by Luce**; konsoleH cron slot (1 of 1) free. No code written yet.
+  **approved by Luce**; konsoleH cron slot (1 of 1) free. Implementation plan + **handover** inside;
+  e-Računi direct API to be researched. No code written yet.
