@@ -183,13 +183,32 @@ here yet. Intended use:
   path, proven on #439/#442). Do **not** create documents directly through the
   API — that bypasses the shop flow (narudžba kupca → račun) and breaks
   numbering/analytics.
-- To find out: endpoint, auth (user / key / token; enabled on BASIC?), method
+- To find out: endpoint (same for test/prod?), auth format, method
   names to list sales orders and invoices by date, which field carries the
   Woo order number, rate limits. Validate response shape against #441 (synced
   normally) and #439 (synced manually 02.11).
-- Credentials: constants in production `wp-config.php` — **never** in the repo
-  or chat. Uploading wp-config is a production change → needs Siniša's
-  approval (or he adds it himself).
+- **Credentials exist for both a test and a production API user** (Siniša,
+  17.11). Find out whether the test user points at a separate test
+  company/sandbox — it must not be able to read or write the real books.
+- Where they live — PHP constants, the WP equivalent of `.env`:
+  - production `/public_html/wp-config.php` → production user/token;
+  - staging `/public_html/labouche/wp-config.php` → **test** user/token;
+  - optionally both in a secrets file outside the web root (SFTP
+    `/lucina-secrets.php`), `require`d from wp-config — verify the path
+    resolves on Hetzner first.
+  - Constants: `LUCINA_ERACUNI_API_USER`, `LUCINA_ERACUNI_API_TOKEN` (+ endpoint
+    if test and prod differ), `LUCINA_ERACUNI_MONITOR_REPAIR` (default
+    `false`). Module no-ops if not defined. Not `.htaccess SetEnv`: the
+    konsoleH cron runs PHP CLI, which never reads `.htaccess`.
+  - **Never** in the repo, CI or chat. The deploy workflow only uploads the
+    mu-plugin, so wp-config is edited by hand over SFTP; production wp-config
+    = production change → Siniša's approval (or he uploads it).
+- Environment guard: use the presence of the credentials (+
+  `wp_get_environment_type()`) rather than a hardcoded host check.
+- **Repair caveat:** `order.synchronize` goes through the *plugin's*
+  connection, not the API user. On staging, check what Eurofaktura is
+  connected to before allowing repair there; if it is the real shop, keep
+  `REPAIR = false` on staging and test repair with stubs only.
 
 ### Module `lucina-spiza/eracuni-monitor.php`
 
