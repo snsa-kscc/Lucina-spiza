@@ -23,11 +23,26 @@ payer (pravna osoba).
 |---|---|---|
 | `0` | Oporezive isporuke dobara i usluga u RH | HR + EU **consumers** |
 | `16` | Oslobođene isporuke — obavljene usluge unutar EU (PDV obračunava primatelj) | EU **VAT payers** |
-| `120` | Izvoz usluga iz EU krajnjim potrošačima u državi izvan EU | Non-EU **consumers** |
+| `120` | Izvoz usluga iz EU krajnjim potrošačima u državi izvan EU | ~~Non-EU consumers~~ — no longer used since 19.10.2026 |
 | `17` | Oslobođene isporuke — obavljene usluge osobama bez sjedišta u RH | Non-EU **VAT payers** |
 
 Result: all EU countries set `0/16` (HR stays `0/0`); **216 non-EU countries**
-set `120/17`.
+set `120/17` on 13.10.2026.
+
+**Changed 19.10.2026 (accountant's instruction):** all consumers — HR, EU and
+non-EU — pay 25% Croatian VAT, sale type `0`. Non-EU consumers are now `0`
+(confirmed 17.11.2026: staging e-Računi imports a US consumer order as
+"Oporezive isporuke dobara i usluga u RH"). Non-EU VAT payers `17` unchanged;
+B2B is paused.
+
+Shop sync settings (Postavke tvrtke → Internet trgovine → sinkronizacija →
+*Preuzeti parametri za uvoz podataka*), same on production and staging:
+Blagajna `1`, Skladište `0000 - Preuzeto skladište`, **Vrsta prodaje (PDV)
+`Oporezive isporuke dobara i usluga u RH`**, all import checkboxes off.
+
+If Woo sends a line with 0% VAT on a sale type `0` order, e-Računi logs
+*"WooCommerce upozorenje uvoza … Primljena stopa PDV-a 0% nije dopuštena …
+stoga je postavljena uobičajena stopa"* and applies 25% itself.
 
 ## Save endpoint (for future bulk edits)
 
@@ -66,7 +81,9 @@ is exceeded or the company registers voluntarily.
 ## WooCommerce tax side
 
 - 28 tax-rate rows; **all EU standard rates set to 25% on purpose** (HR VAT
-  under the threshold). Non-EU countries have no rows → no Woo VAT for them.
+  under the threshold). Since 19.10.2026 non-EU consumers are taxed 25% too.
+  Verified 17.11.2026 via Store API cart on both sites: HR/DE/US → 25% on all
+  Masterclass products; staging-only product `knjiga` → 5% (reduced).
 - Masterclasses → Standard class; PDF book → Reduced rate class.
 - VAT number reaches orders as `_billing_eu_vat_number` (bridged from
   ThemeHigh's `_wc_billing/thwcfe-block/_billing_eu_vat_number`).

@@ -43,13 +43,17 @@ Checkout Field Editor Pro.
 
 ## VAT / PDV decision matrix (current intended state)
 
+**All consumers worldwide pay 25% Croatian VAT** (accountant's instruction;
+shop opened worldwide 19.10.2026). B2B sales are currently paused, so the
+company rows are dormant.
+
 | Customer | Woo tax | `is_vat_exempt` | e-Računi sale type |
 |---|---|---|---|
 | HR consumer | 25% | no | `0` — oporeziva isporuka u RH |
 | HR company | 25% | no | `0` — oporeziva isporuka u RH |
 | EU consumer | 25% (HR VAT, < €10k) | no | `0` — oporeziva isporuka u RH |
 | EU company, valid VAT | 0% | yes | `16` — usluge unutar EU, reverse charge |
-| Non-EU consumer | none | no | `120` — izvoz usluga |
+| Non-EU consumer | 25% (HR VAT) | no | `0` — oporeziva isporuka u RH |
 | Non-EU company, valid VAT | 0% | yes | `17` — usluge osobama bez sjedišta u RH |
 | Invalid VAT ID | taxed | no | consumer row |
 
