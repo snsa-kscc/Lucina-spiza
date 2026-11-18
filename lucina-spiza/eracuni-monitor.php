@@ -4,7 +4,7 @@
  *
  * e-Računi sometimes answers an order webhook with HTTP 200 and then never
  * imports the order (#439, #442). Once a day this module looks up recent
- * orders through the e-Računi API, optionally re-sends missing ones through the
+ * orders (and older ones still in a problem state) through the e-Računi API, optionally re-sends missing ones through the
  * Eurofaktura plugin's own "Sinkroniziraj" call, and emails a report when
  * something needs attention. Silent when everything is fine.
  *
@@ -40,6 +40,19 @@ const LUCINA_ERACUNI_MONITOR_DEFAULT_AT = '04:00';
 /** Order window: created between 48 h and 30 min ago. */
 const LUCINA_ERACUNI_MONITOR_WINDOW = 172800; // 48 h.
 const LUCINA_ERACUNI_MONITOR_GRACE  = 1800;   // 30 min.
+
+/**
+ * Orders older than the window are re-checked for up to 14 days while their
+ * last outcome is one of these problems, until they come back synced.
+ */
+const LUCINA_ERACUNI_MONITOR_RECHECK  = 1209600; // 14 days.
+const LUCINA_ERACUNI_MONITOR_PROBLEMS = array( 'unknown', 'missing', 'needs_correction', 'synced_no_invoice', 'repair_failed', 'repair_unverified' );
+
+/**
+ * "All missing" guard: if the API answers ok but finds none of at least this
+ * many orders, suspect wrong credentials / company rather than real drops.
+ */
+const LUCINA_ERACUNI_MONITOR_SUSPICIOUS_MIN = 3;
 
 /** Stop resyncing an order after this many failed repair runs. */
 const LUCINA_ERACUNI_MONITOR_MAX_REPAIRS = 2;
@@ -251,17 +264,36 @@ function lucina_eracuni_monitor_classify( $sales_order ) {
  */
 
 /**
- * Orders to check: paid, non-zero, created 48 h … 30 min ago.
+ * Orders to check: paid, non-zero, created 48 h … 30 min ago, plus orders up
+ * to 14 days old whose last outcome is still a problem.
  *
  * @return WC_Order[]
  */
 function lucina_eracuni_monitor_orders( $now = null ) {
 	$now = $now ? $now : time();
 
+	$recent = lucina_eracuni_monitor_query( $now - LUCINA_ERACUNI_MONITOR_WINDOW, $now - LUCINA_ERACUNI_MONITOR_GRACE );
+	$older  = array_filter(
+		lucina_eracuni_monitor_query( $now - LUCINA_ERACUNI_MONITOR_RECHECK, $now - LUCINA_ERACUNI_MONITOR_WINDOW - 1 ),
+		function ( $order ) {
+			$state = $order->get_meta( LUCINA_ERACUNI_MONITOR_META );
+			return is_array( $state ) && in_array( $state['outcome'] ?? '', LUCINA_ERACUNI_MONITOR_PROBLEMS, true );
+		}
+	);
+
+	return array_merge( $recent, array_values( $older ) );
+}
+
+/**
+ * Paid, non-zero orders created between two timestamps (inclusive).
+ *
+ * @return WC_Order[]
+ */
+function lucina_eracuni_monitor_query( $from, $to ) {
 	$orders = wc_get_orders(
 		array(
 			'status'       => array( 'processing', 'completed' ),
-			'date_created' => ( $now - LUCINA_ERACUNI_MONITOR_WINDOW ) . '...' . ( $now - LUCINA_ERACUNI_MONITOR_GRACE ),
+			'date_created' => $from . '...' . $to,
 			'limit'        => -1,
 			'type'         => 'shop_order',
 		)
@@ -317,7 +349,28 @@ function lucina_eracuni_monitor_run() {
 		$by_number[ (string) $order->get_order_number() ] = $order;
 	}
 
-	$found   = lucina_eracuni_monitor_fetch( array_map( 'strval', array_keys( $by_number ) ) );
+	$found = lucina_eracuni_monitor_fetch( array_map( 'strval', array_keys( $by_number ) ) );
+
+	// "All missing" guard: an ok answer that finds none of several orders more
+	// likely means wrong API credentials / company than real drops. Treat as a
+	// failed check (unknown), so nothing is reported as missing or resynced.
+	// Orders already known to be absent don't count — re-checking them and not
+	// finding them is expected.
+	$expected = array_filter(
+		$by_number,
+		function ( $order ) {
+			$state = $order->get_meta( LUCINA_ERACUNI_MONITOR_META );
+			return ! is_array( $state ) || ! in_array( $state['outcome'] ?? '', array( 'missing', 'repair_failed' ), true );
+		}
+	);
+
+	if ( ! is_wp_error( $found ) && ! $found && count( $expected ) >= LUCINA_ERACUNI_MONITOR_SUSPICIOUS_MIN ) {
+		$found = new WP_Error(
+			'lucina_eracuni_suspicious',
+			sprintf( 'e-Računi nije vratio nijednu od %d narudžbi — provjeriti API podatke (korisnik, tvrtka) ili je sinkronizacija potpuno stala. Automatski popravak preskočen.', count( $by_number ) )
+		);
+	}
+
 	$results = array();
 
 	foreach ( $by_number as $number => $order ) {
@@ -446,7 +499,7 @@ function lucina_eracuni_monitor_label( $outcome ) {
 		'repaired'          => 'Popravljeno — ponovno sinkronizirano',
 		'repair_failed'     => 'Ponovna sinkronizacija nije uspjela',
 		'repair_unverified' => 'Ponovno sinkronizirano, ali provjera nije uspjela',
-		'unknown'           => 'Provjera nije uspjela (e-Računi API nedostupan) — ponovit će se sutra',
+		'unknown'           => 'Provjera nije uspjela — ponovit će se sutra',
 	);
 
 	return $labels[ $outcome ] ?? $outcome;
