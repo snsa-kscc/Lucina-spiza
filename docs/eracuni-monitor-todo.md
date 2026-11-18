@@ -19,6 +19,9 @@ Open items for `lucina-spiza/eracuni-monitor.php`. Background:
       the whole run is `unknown` with a "provjeriti API podatke" reason, so
       nothing is reported as missing or resynced. Matters most right after the
       production credentials go in.
+- [x] **API retries.** Done: connection errors, HTTP 429 and 5xx are retried
+      twice (15 s, then 30 s). Added after a one-off 502 from e-Računi during
+      the production credential check (18.11.2026).
 - [x] **Remove the staging test run time** `LUCINA_ERACUNI_MONITOR_AT` test line (was `'12:56'`)
       from `/public_html/labouche/wp-config.php` — staging back to 04:00.
 
@@ -29,10 +32,10 @@ number-list test, weekly status email.
 ## Go-live
 
 - [ ] Merge PR #4; promote to production (Actions → Deploy → `production`).
-- [ ] Production API user (read-only if roles allow — repair resyncs through
-      the Eurofaktura plugin's own connection, not this user). Block prepared,
-      **commented out**, in `/public_html/wp-config.php` (18.11.2026): fill in
-      URL/USER/SECRET/TOKEN, then delete the `ACTIVATE` and `END` lines.
+- [x] Production API user (read-only if roles allow — repair resyncs through
+      the Eurofaktura plugin's own connection, not this user). Filled in and
+      active in `/public_html/wp-config.php`; credentials verified against
+      orders #459–#464 (18.11.2026).
       `REPAIR = true` from the start (decided 18.11.2026), emails
       `sinisa@dvasadva.com,infobarbioza@gmail.com`, no `WP_ENVIRONMENT_TYPE`.
       Backup of the previous file: `/wp-config.prod.bak-20261118` (account

@@ -58,6 +58,13 @@ const LUCINA_ERACUNI_MONITOR_SUSPICIOUS_MIN = 3;
 const LUCINA_ERACUNI_MONITOR_MAX_REPAIRS = 2;
 
 /**
+ * API retries on connection errors, HTTP 429 and 5xx (e-Računi has short
+ * outages): 2 retries, waiting 15 s then 30 s.
+ */
+const LUCINA_ERACUNI_MONITOR_RETRIES     = 2;
+const LUCINA_ERACUNI_MONITOR_RETRY_DELAY = 15;
+
+/**
  * Whether the monitor is configured on this site.
  */
 function lucina_eracuni_monitor_enabled() {
@@ -177,28 +184,44 @@ function lucina_eracuni_api( $method, array $parameters ) {
 		return $stub;
 	}
 
-	$response = wp_remote_post(
-		LUCINA_ERACUNI_API_URL,
-		array(
-			'timeout' => 30,
-			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => wp_json_encode(
-				array(
-					'username'   => LUCINA_ERACUNI_API_USER,
-					'secretKey'  => LUCINA_ERACUNI_API_SECRET,
-					'token'      => LUCINA_ERACUNI_API_TOKEN,
-					'method'     => $method,
-					'parameters' => (object) $parameters,
-				)
-			),
-		)
+	$request = array(
+		'timeout' => 30,
+		'headers' => array( 'Content-Type' => 'application/json' ),
+		'body'    => wp_json_encode(
+			array(
+				'username'   => LUCINA_ERACUNI_API_USER,
+				'secretKey'  => LUCINA_ERACUNI_API_SECRET,
+				'token'      => LUCINA_ERACUNI_API_TOKEN,
+				'method'     => $method,
+				'parameters' => (object) $parameters,
+			)
+		),
 	);
+
+	// Retry transient failures with exponential backoff. Bad credentials come
+	// back as HTTP 200 with an error status and are not retried.
+	$delay = LUCINA_ERACUNI_MONITOR_RETRY_DELAY;
+	for ( $attempt = 0; ; $attempt++ ) {
+		$response = wp_remote_post( LUCINA_ERACUNI_API_URL, $request );
+		$code     = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+		$failed   = is_wp_error( $response ) || 429 === $code || $code >= 500;
+
+		if ( ! $failed || $attempt >= LUCINA_ERACUNI_MONITOR_RETRIES ) {
+			break;
+		}
+
+		lucina_eracuni_monitor_log(
+			'warning',
+			sprintf( '%s: %s — novi pokušaj za %d s', $method, is_wp_error( $response ) ? $response->get_error_message() : 'HTTP ' . $code, $delay )
+		);
+		sleep( $delay );
+		$delay *= 2;
+	}
 
 	if ( is_wp_error( $response ) ) {
 		return $response;
 	}
 
-	$code = wp_remote_retrieve_response_code( $response );
 	$body = json_decode( wp_remote_retrieve_body( $response ), true );
 	$data = is_array( $body ) && isset( $body['response'] ) ? $body['response'] : null;
 
