@@ -5,13 +5,11 @@ Workspace for the lucinaspiza.com WooCommerce store and its e-Računi
 
 ## Layout
 
-- `Lucina-spiza/` — clone of `github.com/snsa-kscc/Lucina-spiza`, a WordPress
-  **mu-plugin** with custom checkout logic (company invoice checkbox, EU VAT/OIB
-  validation, e-Računi bridging).
-- `remote/` — user's SSHFS mount of the hosting account (`luce:`). Treat as
-  read-mostly; see `docs/remote-access.md`.
-- `racuni.CSV` — e-Računi invoice export, kept for reference.
-- `docs/` — what was set up and why. Read before touching tax logic.
+This repo (`github.com/snsa-kscc/Lucina-spiza`) is a WordPress **mu-plugin**:
+`lucina-spiza.php` loads the modules in `lucina-spiza/` (checkout company/VAT
+handling, express checkout, e-Računi bridging and sync monitor, email texts).
+`docs/` explains what was set up and why — read before touching tax logic.
+The hosting account is reached over SFTP only (`docs/remote-access.md`).
 
 ## Environments
 
@@ -32,9 +30,8 @@ Checkout Field Editor Pro.
   Deployment = GitHub Actions: merge to `main` deploys staging; production is
   promoted with Actions → Deploy → Run workflow (target `production`). See
   `docs/deployment.md`.
-- **Do not run `git` over SSHFS** on remote checkouts — ownership (remote UID
-  1786) and FETCH_HEAD writes fail. The staging mu-plugins dir is no longer a
-  git repo anyway; upload changed files and verify with `sha256sum`.
+- **Do not run `git` on the server** — the SFTP backend can't handle it. Code
+  goes through CI; wp-config edits follow `docs/remote-access.md`.
 - Never edit the commercial Eurofaktura plugin — all custom code lives in the
   mu-plugin repo.
 - EU B2C is charged **25% Croatian VAT on purpose**: the business is below the
@@ -43,9 +40,8 @@ Checkout Field Editor Pro.
 
 ## VAT / PDV decision matrix (current intended state)
 
-**All consumers worldwide pay 25% Croatian VAT** (accountant's instruction;
-shop opened worldwide 19.10.2026). B2B sales are currently paused, so the
-company rows are dormant.
+**All consumers worldwide pay 25% Croatian VAT** (accountant's instruction).
+B2B sales are currently paused, so the company rows are dormant.
 
 | Customer | Woo tax | `is_vat_exempt` | e-Računi sale type |
 |---|---|---|---|
@@ -72,21 +68,12 @@ exempts only non-`HR` billing countries.
 
 ## Docs
 
-- `docs/eracuni-configuration.md` — e-Računi country mappings, save endpoint,
-  BASIC-package limits, Woo tax table.
-- `docs/b2b-vat-exemption.md` — the EU B2B over-charging bug, PR #1 fix,
-  staging deployment.
-- `docs/remote-access.md` — SSH/SFTP/SSHFS access model and every pitfall hit.
-- `docs/deployment.md` — CI deploy to staging/production, secrets.
+- `docs/eracuni-configuration.md` — e-Računi sale types per country, import
+  parameters, bulk-edit endpoint, why no OSS, Woo tax side.
+- `docs/eracuni-monitor.md` — nightly e-Računi sync check + auto-resync
+  (live on production): flow, outcomes, email, schedule, config.
+- `docs/b2b-vat-exemption.md` — how company orders get 0% VAT (B2B paused).
 - `docs/vies-validation-proposal.md` — proposed VIES lookup before granting
-  B2B exemption; pending client decision. No code written yet.
-- `docs/staging-config-diff-handover.md` — **open handover**: staging sends 0% VAT
-  on Google Pay orders (#268/#269) while production is fine; find and align
-  config differences.
-- `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
-  webhooks (200, no sync); incidents #439/#442. Daily 04:00 check + auto-resync
-  **approved by Luce**. Implementation plan + handover inside. Merged (PR #4)
-  and live on production 18.11.2026 with `REPAIR = true`; the single konsoleH
-  cron slot runs production `wp-cron.php` every 15 min (staging has none).
-- `docs/eracuni-monitor-outcomes.md` — flowchart of the monitor's outcomes,
-  repair branch and email rule.
+  B2B exemption; pending client decision, no code.
+- `docs/deployment.md` — CI deploy to staging/production, secrets.
+- `docs/remote-access.md` — SFTP-only access, safe wp-config edits.

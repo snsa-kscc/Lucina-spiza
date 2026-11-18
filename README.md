@@ -16,9 +16,13 @@ This repository contains a WordPress must-use plugin that holds site-specific cu
 ## Modules
 
 - `vat.php` — VAT validation helpers
-- `checkout-company.php` — Company/billing checkout fields
+- `checkout-company.php` — Company/billing checkout fields, B2B VAT exemption
+- `express-checkout.php` — Express checkout (wallet) tweaks
 - `checkout-labels.php` — Checkout label tweaks
 - `gift-downloads.php` — Gift download handling
 - `eracuni.php` — e-Računi integration
+- `eracuni-monitor.php` — Nightly e-Računi sync check and repair
 - `email-texts.php` — WooCommerce e-mail copy overrides
 - `mail-audit.php` — Mail audit/logging utility
+
+Docs: `docs/` (start with `AGENTS.md`).

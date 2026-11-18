@@ -61,7 +61,3 @@ Repository secrets (Settings → Secrets and variables → Actions):
 |---|---|
 | `SSH_PRIVATE_KEY` | a dedicated deploy key (no passphrase) |
 | `SSH_KNOWN_HOSTS` | the server's host-key line(s), from `ssh-keygen -F www258.your-server.de` on a machine that already trusts it; strict checking is on |
-
-Tested against a local SFTP-only, chrooted OpenSSH server: upload, stale-file
-deletion, `.git-bak` preserved, verify fails on a tampered file, wrong host key
-refused.

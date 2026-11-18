@@ -20,7 +20,7 @@
  *
  * The module does nothing unless the API constants are defined.
  *
- * See docs/eracuni-sync-monitor-proposal.md.
+ * See docs/eracuni-monitor.md.
  *
  * @package LucinaSpiza
  */
@@ -58,8 +58,8 @@ const LUCINA_ERACUNI_MONITOR_SUSPICIOUS_MIN = 3;
 const LUCINA_ERACUNI_MONITOR_MAX_REPAIRS = 2;
 
 /**
- * API retries on connection errors, HTTP 429 and 5xx (e-Računi has short
- * outages): 2 retries, waiting 15 s then 30 s.
+ * API retries on connection errors, HTTP 429 and non-JSON 5xx (e-Računi has
+ * short gateway outages): 2 retries, waiting 15 s then 30 s.
  */
 const LUCINA_ERACUNI_MONITOR_RETRIES     = 2;
 const LUCINA_ERACUNI_MONITOR_RETRY_DELAY = 15;
@@ -198,13 +198,15 @@ function lucina_eracuni_api( $method, array $parameters ) {
 		),
 	);
 
-	// Retry transient failures with exponential backoff. Bad credentials come
-	// back as HTTP 200 with an error status and are not retried.
+	// Retry transient failures with exponential backoff. A 5xx with a JSON body
+	// is a real API answer (e.g. bad credentials come back as HTTP 500 +
+	// status "error") and is not retried; gateway errors (HTML 502 page) are.
 	$delay = LUCINA_ERACUNI_MONITOR_RETRY_DELAY;
 	for ( $attempt = 0; ; $attempt++ ) {
 		$response = wp_remote_post( LUCINA_ERACUNI_API_URL, $request );
 		$code     = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
-		$failed   = is_wp_error( $response ) || 429 === $code || $code >= 500;
+		$answered = ! is_wp_error( $response ) && is_array( json_decode( wp_remote_retrieve_body( $response ), true ) );
+		$failed   = is_wp_error( $response ) || 429 === $code || ( $code >= 500 && ! $answered );
 
 		if ( ! $failed || $attempt >= LUCINA_ERACUNI_MONITOR_RETRIES ) {
 			break;

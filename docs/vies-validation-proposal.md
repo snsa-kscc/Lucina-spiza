@@ -35,10 +35,9 @@ Known caveats:
 - Response time typically 0.5–3s.
 - Greece uses prefix `EL` (not `GR`) in VIES; Northern Ireland is `XI`.
 
-## Hosting check (done)
+## Hosting
 
-PHP **8.2** on the account (`.phpversion`), `SoapClient` enabled — verified via
-temporary `phpinfo()` on staging. No hosting changes needed.
+`SoapClient` is enabled on the hosting; no changes needed.
 
 ## How it fits into the current implementation
 
