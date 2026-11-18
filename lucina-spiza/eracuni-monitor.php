@@ -15,6 +15,7 @@
  *   LUCINA_ERACUNI_API_TOKEN      organization token
  *   LUCINA_ERACUNI_MONITOR_REPAIR true = resync missing orders (default false)
  *   LUCINA_ERACUNI_MONITOR_EMAILS comma-separated alert recipients
+ *   LUCINA_ERACUNI_MONITOR_AT     run time "HH:MM" Europe/Zagreb (default 04:00)
  *   WP_ENVIRONMENT_TYPE           'staging' on staging → "[STAGING]" in subject
  *
  * The module does nothing unless the API constants are defined.
@@ -33,8 +34,8 @@ const LUCINA_ERACUNI_MONITOR_GROUP = 'lucina-spiza';
 const LUCINA_ERACUNI_MONITOR_META  = '_lucina_eracuni_monitor';
 const LUCINA_ERACUNI_MONITOR_LOG   = 'lucina-spiza-eracuni-monitor';
 
-/** Run time, Europe/Zagreb. */
-const LUCINA_ERACUNI_MONITOR_AT = '04:00';
+/** Default run time, Europe/Zagreb. Override with LUCINA_ERACUNI_MONITOR_AT in wp-config. */
+const LUCINA_ERACUNI_MONITOR_DEFAULT_AT = '04:00';
 
 /** Order window: created between 48 h and 30 min ago. */
 const LUCINA_ERACUNI_MONITOR_WINDOW = 172800; // 48 h.
@@ -77,13 +78,23 @@ function lucina_eracuni_monitor_log( $level, $message ) {
  * ---------------------------------------------------------------------------
  */
 
+/**
+ * Configured run time "HH:MM" (Europe/Zagreb).
+ */
+function lucina_eracuni_monitor_at() {
+	$at = defined( 'LUCINA_ERACUNI_MONITOR_AT' ) ? (string) LUCINA_ERACUNI_MONITOR_AT : '';
+
+	return preg_match( '/^([01]\d|2[0-3]):[0-5]\d$/', $at ) ? $at : LUCINA_ERACUNI_MONITOR_DEFAULT_AT;
+}
+
 function lucina_eracuni_monitor_next_run( $now = null ) {
 	$tz   = new DateTimeZone( 'Europe/Zagreb' );
 	$now  = $now ? $now : time();
-	$next = new DateTimeImmutable( 'today ' . LUCINA_ERACUNI_MONITOR_AT, $tz );
+	$at   = lucina_eracuni_monitor_at();
+	$next = new DateTimeImmutable( 'today ' . $at, $tz );
 
 	if ( $next->getTimestamp() <= $now + MINUTE_IN_SECONDS ) {
-		$next = new DateTimeImmutable( 'tomorrow ' . LUCINA_ERACUNI_MONITOR_AT, $tz );
+		$next = new DateTimeImmutable( 'tomorrow ' . $at, $tz );
 	}
 
 	return $next->getTimestamp();
@@ -99,8 +110,19 @@ function lucina_eracuni_monitor_schedule() {
 		return;
 	}
 
-	if ( false === as_next_scheduled_action( LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP ) ) {
-		as_schedule_single_action( lucina_eracuni_monitor_next_run(), LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+	$pending = as_next_scheduled_action( LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+	$next    = lucina_eracuni_monitor_next_run();
+
+	if ( false === $pending ) {
+		as_schedule_single_action( $next, LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+		return;
+	}
+
+	// Run time changed in wp-config: move the queued run. Leave it alone if it
+	// is running (true) or due within 2 minutes, so a due run is never dropped.
+	if ( is_int( $pending ) && $pending > time() + 2 * MINUTE_IN_SECONDS && $pending !== $next ) {
+		as_unschedule_all_actions( LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
+		as_schedule_single_action( $next, LUCINA_ERACUNI_MONITOR_HOOK, array(), LUCINA_ERACUNI_MONITOR_GROUP );
 	}
 }
 add_action( 'action_scheduler_init', 'lucina_eracuni_monitor_schedule' );
