@@ -86,4 +86,5 @@ exempts only non-`HR` billing countries.
 - `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
   webhooks (200, no sync); incidents #439/#442. Daily 04:00 check + auto-resync
   **approved by Luce**; konsoleH cron slot (1 of 1) free. Implementation plan + **handover** inside;
-  e-Računi direct API to be researched. No code written yet.
+  Implemented on branch `feat/eracuni-sync-monitor` (PR #4), deployed to staging.
+- `docs/eracuni-monitor-todo.md` — open gaps and go-live checklist for the monitor.

@@ -495,10 +495,21 @@ function lucina_eracuni_monitor_email( array $report ) {
 
 	$lines[] = 'Automatska poruka, šalje se samo kad nešto treba pažnju.';
 
+	// Send as the shop's WooCommerce sender (e.g. woo@lucinaspiza.com) instead of
+	// WordPress' default wordpress@<host>: on staging that is the labouche
+	// subdomain, which has no SPF, so Gmail files the alert as spam.
+	$headers = array();
+	$from    = (string) get_option( 'woocommerce_email_from_address' );
+	if ( is_email( $from ) ) {
+		$name      = wp_specialchars_decode( (string) get_option( 'woocommerce_email_from_name' ), ENT_QUOTES );
+		$headers[] = 'From: ' . ( '' !== $name ? $name . ' <' . $from . '>' : $from );
+	}
+
 	$sent = wp_mail(
 		$recipients,
 		sprintf( '%s[%s] e-Računi: %d narudžbi treba pažnju', $tag, $site, count( $report ) ),
-		implode( "\n", $lines )
+		implode( "\n", $lines ),
+		$headers
 	);
 
 	if ( ! $sent ) {
