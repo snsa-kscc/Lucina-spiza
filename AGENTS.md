@@ -1,4 +1,4 @@
-# Lucina Špica — WooCommerce ↔ e-Računi
+# Lucina Spiza — WooCommerce ↔ e-Računi
 
 Workspace for the lucinaspiza.com WooCommerce store and its e-Računi
 (Eurofaktura) invoicing integration.
@@ -13,10 +13,10 @@ The hosting account is reached over SFTP only (`docs/remote-access.md`).
 
 ## Environments
 
-| | Site | Remote path |
-|---|---|---|
-| Production | lucinaspiza.com | `/public_html` |
-| Staging | labouche.lucinaspiza.com | `/public_html/labouche` |
+|            | Site                     | Remote path             |
+| ---------- | ------------------------ | ----------------------- |
+| Production | lucinaspiza.com          | `/public_html`          |
+| Staging    | labouche.lucinaspiza.com | `/public_html/labouche` |
 
 The mu-plugin deploys to `wp-content/mu-plugins/` on each. Stack observed on
 staging: WP 7.1.3, WooCommerce 11.0.0, Eurofaktura plugin 1.1.9, ThemeHigh
@@ -43,15 +43,15 @@ Checkout Field Editor Pro.
 **All consumers worldwide pay 25% Croatian VAT** (accountant's instruction).
 B2B sales are currently paused, so the company rows are dormant.
 
-| Customer | Woo tax | `is_vat_exempt` | e-Računi sale type |
-|---|---|---|---|
-| HR consumer | 25% | no | `0` — oporeziva isporuka u RH |
-| HR company | 25% | no | `0` — oporeziva isporuka u RH |
-| EU consumer | 25% (HR VAT, < €10k) | no | `0` — oporeziva isporuka u RH |
-| EU company, valid VAT | 0% | yes | `16` — usluge unutar EU, reverse charge |
-| Non-EU consumer | 25% (HR VAT) | no | `0` — oporeziva isporuka u RH |
-| Non-EU company, valid VAT | 0% | yes | `17` — usluge osobama bez sjedišta u RH |
-| Invalid VAT ID | taxed | no | consumer row |
+| Customer                  | Woo tax              | `is_vat_exempt` | e-Računi sale type                      |
+| ------------------------- | -------------------- | --------------- | --------------------------------------- |
+| HR consumer               | 25%                  | no              | `0` — oporeziva isporuka u RH           |
+| HR company                | 25%                  | no              | `0` — oporeziva isporuka u RH           |
+| EU consumer               | 25% (HR VAT, < €10k) | no              | `0` — oporeziva isporuka u RH           |
+| EU company, valid VAT     | 0%                   | yes             | `16` — usluge unutar EU, reverse charge |
+| Non-EU consumer           | 25% (HR VAT)         | no              | `0` — oporeziva isporuka u RH           |
+| Non-EU company, valid VAT | 0%                   | yes             | `17` — usluge osobama bez sjedišta u RH |
+| Invalid VAT ID            | taxed                | no              | consumer row                            |
 
 Croatian companies are always domestic-taxable, even with an OIB — the code
 exempts only non-`HR` billing countries.
