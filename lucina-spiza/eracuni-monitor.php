@@ -439,7 +439,10 @@ function lucina_eracuni_monitor_run() {
 	}
 
 	// Persist state and decide what to report (each order once per outcome).
-	$report = array();
+	// Exception: while the check itself fails (API error or "all missing"
+	// guard), report every order each night, so a long outage never goes quiet.
+	$check_failed = is_wp_error( $found );
+	$report       = array();
 	foreach ( $results as $number => $result ) {
 		$order = $result['order'];
 		$order->update_meta_data(
@@ -455,7 +458,7 @@ function lucina_eracuni_monitor_run() {
 		$changed  = $result['outcome'] !== $result['previous'];
 		$resolved = 'synced' === $result['outcome'] && '' !== $result['previous'] && 'synced' !== $result['previous'];
 
-		if ( $changed && ( 'synced' !== $result['outcome'] || $resolved ) ) {
+		if ( $check_failed || ( $changed && ( 'synced' !== $result['outcome'] || $resolved ) ) ) {
 			$report[] = $result;
 		}
 

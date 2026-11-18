@@ -111,6 +111,9 @@ An order is in the email only when its outcome **changed** since the last run
   synced   ──► synced                 no
 ```
 
+Exception: when the check itself fails (API error or "all missing" guard),
+every order is in the email every night until the API works again.
+
 Each order is checked on the nights inside the 48 h window (normally two).
 After that, it is re-checked every night for up to 14 days only while its
 last outcome is a problem — so an order fixed by hand late still comes back
