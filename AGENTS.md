@@ -85,5 +85,8 @@ exempts only non-`HR` billing countries.
   config differences.
 - `docs/eracuni-sync-monitor-proposal.md` — e-Računi silently drops some order
   webhooks (200, no sync); incidents #439/#442. Daily 04:00 check + auto-resync
-  **approved by Luce**; konsoleH cron slot (1 of 1) free. Implementation plan + **handover** inside;
-  e-Računi direct API to be researched. No code written yet.
+  **approved by Luce**. Implementation plan + handover inside. Merged (PR #4)
+  and live on production 18.11.2026 with `REPAIR = true`; the single konsoleH
+  cron slot runs production `wp-cron.php` every 15 min (staging has none).
+- `docs/eracuni-monitor-outcomes.md` — flowchart of the monitor's outcomes,
+  repair branch and email rule.

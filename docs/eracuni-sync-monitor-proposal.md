@@ -170,10 +170,71 @@ repaired / repair fails / API error). On production, run a few days with
     = warning, otherwise success) and `message`.
 - Plugin is connected when `get_option('eurofaktura_connected')`.
 
-### e-Računi API (NEW — to be researched)
+### e-Računi API (docs read 18.11.2026; no live call yet)
 
-e-Računi has its own API and we have access (Siniša, 17.11). Nothing documented
-here yet. Intended use:
+Docs: `https://e-racuni.hr/rhr22/ApiDocumentation-Method-<Method>` and
+`…/ApiDocumentation-Datatypes-<Type>` (needs a GUI login; a logged-out browser
+shows the demo company "TEST AGENCIJA").
+
+- **Transport:** HTTPS POST, JSON body
+  `{"username","secretKey","token","method","parameters":{…}}`. The test
+  console also shows a CLI form
+  `curl https://e-racuni.com/WebServicesHR/API-CLI/<Method> -u USER:SECRET_TOKEN`.
+  The endpoint host/path **can differ per organization** — copy it from the
+  logged-in console (CURL tab), don't assume `eurofaktura.com/WebServices/API`.
+- **Auth:** API user (created in Postavke tvrtke → API web servisi) +
+  secretKey + organization token. API user has exactly the GUI user's
+  privileges → create a **read-only** user for the monitor if roles allow.
+- **Rate limit:** ~1 req/s per IP, burst of 4, **no concurrent requests per
+  API user**. A daily run with 2 list calls is far below this.
+- **`SalesOrderList`** (narudžbe kupca): filters `dateFrom/dateTo`,
+  `orderReceivalDateFrom/To`, `issuedTimestampFrom/To`, `orderReference`,
+  `number`, `status`, `methodOfPayment`, `remarks`, `buyer`… Max **500** rows.
+  Returns `SalesOrder[]`: `documentID`, `number`, `status`, `date`,
+  `orderReference`, `remarks`, `buyerEMail`, `documentAmount`,
+  `salesInvoiceRef` / `salesInvoicesRef` (račun(i) issued from it),
+  `issuedTimestamp`, `Items`, `PaymentRecords`.
+- **`SalesInvoiceList`** (računi): filters `dateFrom/dateTo` (date types can't
+  be mixed), `issuedTimestampFrom/To`, `salesOrderNumber`, `orderReference`,
+  `number`, `status`… Max **500**. Returns `SalesInvoice[]` incl.
+  `salesOrderRef` / `salesOrdersRef`, `orderReference`, `number`.
+#### Live test (18.11.2026, test API user → test company)
+
+The test API user (`BARBI`) is in company **[205.490027] buoyfriend d.o.o. 1**,
+which is the company the **staging** shop syncs into (it holds staging orders
+220–269). It is not the production books → safe for read calls and for
+staging tests of the monitor with real data. Endpoint that worked:
+`POST https://e-racuni.com/WebServicesHR/API` (JSON; server tag `H6i`).
+
+- **Woo order number = `SalesOrder.number`** (e.g. Woo #267 → `"number":"267"`).
+  `orderReference` is empty for web-shop imports; `reference` is `"99"`.
+  Manually created orders use the `2026-00001` format, so they never collide.
+- **Exact lookup:** `SalesOrderList` with `{"number":"267,268,9999"}` returns
+  only the ones that exist — absent number ⇒ no narudžba kupca ⇒ `missing`.
+  One call per run for all orders in the window; no date filters needed.
+- **Invoice link:** `salesInvoiceRef` / `salesInvoicesRef` = račun number
+  (e.g. `44/01/261`), `null` if no račun.
+- **New failure mode seen:** imports with warnings get `status:
+  "CorrectionPending"`, no račun, and the reason in `remarks` (VAT rate not
+  allowed for the sale type, imported total ≠ shop total). Staging #268/#269
+  are exactly this (see `staging-config-diff-handover.md`). The monitor should
+  report these as `needs_correction` with the `remarks` text — **not** resync
+  (resync re-imports the same data).
+- **Errors:** wrong secret → HTTP **500** with
+  `{"response":{"status":"error","description":"Uneseno korisničko ime ili zaporka nisu valjani."}}`.
+  Success → `{"response":{"status":"ok","result":[…]}}`. Anything other than
+  `status == "ok"` ⇒ `unknown`.
+- Check rule (replaces the `order.refresh` rule for the monitor):
+
+  | e-Računi state | Class | Action |
+  |---|---|---|
+  | number absent | `missing` | resync (when repair on) |
+  | `CorrectionPending` | `needs_correction` | alert with `remarks` |
+  | present, `salesInvoiceRef` empty, other status | `synced_no_invoice` | alert |
+  | present, `salesInvoiceRef` set | `synced` | silent |
+  | API error / timeout | `unknown` | retry next run |
+
+Intended use (unchanged):
 
 - **Check** via the e-Računi API instead of `order.refresh`: one list call per
   run (sales orders + invoices for the window), matched to Woo order numbers.
@@ -214,22 +275,30 @@ here yet. Intended use:
 
 Register it in the module list in `lucina-spiza.php`.
 
-- **Guards:** no-op unless Eurofaktura functions exist, `eurofaktura_connected`,
-  and host is `lucinaspiza.com` (staging can never touch the real books;
-  filter to override for stubbed tests).
+- **Guards:** no-op unless the `LUCINA_ERACUNI_API_*` constants are defined
+  (staging has the test user → test company, so it can't reach the real
+  books). Repair additionally needs `LUCINA_ERACUNI_MONITOR_REPAIR === true`
+  and a connected Eurofaktura plugin.
+- **Recipients:** `LUCINA_ERACUNI_MONITOR_EMAILS` (comma-separated) in each
+  site's wp-config — staging: Siniša; production: Siniša + Luce. Not set ⇒
+  no email, warning in the log.
+- **Environment:** `WP_ENVIRONMENT_TYPE` (`wp_get_environment_type()`,
+  default `production`). Staging defines `staging`; production leaves it
+  unset. Non-production alert subjects start with `[STAGING]`.
 - **Schedule:** single Action Scheduler action at the next 04:00
   Europe/Zagreb (compute with `DateTimeZone('Europe/Zagreb')`); each run
   schedules the next; on init re-create if none pending. Avoids UTC/DST issues
   of cron expressions.
 - **Select:** `processing`/`completed`, created 48 h … 30 min ago.
   Skip orders with total 0 (proposed — confirm).
-- **Classify:** `synced`, `synced_no_invoice`, `missing`, `unknown`.
-  API failure / non-200 / `null` → `unknown`, never `missing`.
+- **Classify:** one `SalesOrderList` by `number` (see table above) →
+  `synced`, `synced_no_invoice`, `needs_correction`, `missing`, `unknown`.
+  API failure / non-200 / `status != ok` → `unknown`, never `missing`.
 - **Repair** (`missing` only, when `LUCINA_ERACUNI_MONITOR_REPAIR` is true):
   `order.synchronize` with a longer timeout (~30 s), then re-check. Order meta
   `_lucina_eracuni_monitor` = attempts + last outcome; give up after 2 runs.
-- **Alert:** plain-text `wp_mail` in Croatian to infobarbioza@gmail.com +
-  sinisa@dvasadva.com, only on a new outcome per order; admin edit links.
+- **Alert:** plain-text `wp_mail` in Croatian to `LUCINA_ERACUNI_MONITOR_EMAILS`,
+  only on a new outcome per order; admin edit links.
 - **Log:** `wc_get_logger()`, source `lucina-spiza-eracuni-monitor`.
 - **Test hook:** filter `lucina_eracuni_monitor_response` to stub API responses
   (synced / dropped / repair OK / repair fails / API down).
@@ -251,12 +320,12 @@ Register it in the module list in `lucina-spiza.php`.
 Black Friday price change (23.–29.11: 55→39,99, 99→69,99, 149→99,99) is part
 of the same 3 h budget but needs no code — tracked separately.
 
-### Decisions pending from Siniša
+### Decisions (Siniša, 18.11.2026)
 
-1. Alerts-only first, then repair? (recommended: yes)
-2. Skip €0 orders? (recommended: yes)
-3. Alert email in Croatian? (recommended: yes)
-4. Backfill to 01.10? (recommended: yes, report-only)
+1. Alerts-only first, then repair — **yes**.
+2. Skip €0 orders — **yes**.
+3. Alert email in Croatian — **yes**.
+4. Backfill to 01.10 — **no** (not selected).
 
 ## Handover (17.11.2026)
 
@@ -319,3 +388,24 @@ State at handover:
   wallet orders are fine — this is a **staging configuration difference**
   (Woo and/or e-Računi staging set up differently from production; not code).
   Find and align the difference before using staging to test the monitor.
+
+## Progress (18.11.2026)
+
+- Branch `feat/eracuni-sync-monitor`: module `lucina-spiza/eracuni-monitor.php`
+  written and registered; not deployed, no PR yet.
+- Staging `/public_html/labouche/wp-config.php`: `LUCINA_ERACUNI_API_URL`,
+  `_USER`, `_SECRET`, `_TOKEN` (test user) and `LUCINA_ERACUNI_MONITOR_REPAIR
+  = false`, `LUCINA_ERACUNI_MONITOR_EMAILS = sinisa@dvasadva.com` and
+  `WP_ENVIRONMENT_TYPE = staging` added in the custom-values block; uploaded over SFTP, verified by
+  sha256, site 200. (Upload also normalized the file from CRLF to LF.)
+- Local copy of the test credentials: `.env.local` (git-ignored).
+- Production wp-config untouched. For go-live it needs the production API
+  user's four `LUCINA_ERACUNI_API_*` constants, `LUCINA_ERACUNI_MONITOR_EMAILS =
+  'sinisa@dvasadva.com,infobarbioza@gmail.com'`, `REPAIR = false`, and **no**
+  `WP_ENVIRONMENT_TYPE` (needs Siniša's approval).
+- **konsoleH cron set up for staging (18.11.2026)** — the only slot (1 of 1):
+  `MAILTO=""` + `*/15 * * * *` PHP 8.2
+  `/usr/www/users/tessry/labouche/wp-cron.php`, exclusive (konsoleH wraps it in
+  `flock`). At go-live **edit this job** to `/usr/www/users/tessry/wp-cron.php`
+  (no second slot). Note: the "Add" confirmation page shows `@reboot` — that is
+  just the reset form; check Advanced View for what was stored.
