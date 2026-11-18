@@ -88,3 +88,5 @@ exempts only non-`HR` billing countries.
   **approved by Luce**; konsoleH cron slot (1 of 1) free. Implementation plan + **handover** inside;
   Implemented on branch `feat/eracuni-sync-monitor` (PR #4), deployed to staging.
 - `docs/eracuni-monitor-todo.md` — open gaps and go-live checklist for the monitor.
+- `docs/eracuni-monitor-outcomes.md` — flowchart of the monitor's outcomes,
+  repair branch and email rule.
