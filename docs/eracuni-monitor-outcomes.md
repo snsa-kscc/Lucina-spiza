@@ -1,7 +1,6 @@
 # e-Računi monitor — outcomes
 
 How `lucina-spiza/eracuni-monitor.php` classifies each order on the nightly run.
-See also `eracuni-monitor-todo.md`.
 
 ## Check
 
