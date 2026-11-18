@@ -29,17 +29,20 @@ number-list test, weekly status email.
 ## Go-live
 
 - [ ] Merge PR #4; promote to production (Actions → Deploy → `production`).
-- [ ] Production API user (read-only if roles allow); its four
-      `LUCINA_ERACUNI_API_*` constants, `LUCINA_ERACUNI_MONITOR_EMAILS =
-'sinisa@dvasadva.com,infobarbioza@gmail.com'`, `REPAIR = false`, no
-      `WP_ENVIRONMENT_TYPE`, in `/public_html/wp-config.php` — **needs approval**.
+- [ ] Production API user (read-only if roles allow — repair resyncs through
+      the Eurofaktura plugin's own connection, not this user). Block prepared,
+      **commented out**, in `/public_html/wp-config.php` (18.11.2026): fill in
+      URL/USER/SECRET/TOKEN, then delete the `ACTIVATE` and `END` lines.
+      `REPAIR = true` from the start (decided 18.11.2026), emails
+      `sinisa@dvasadva.com,infobarbioza@gmail.com`, no `WP_ENVIRONMENT_TYPE`.
+      Backup of the previous file: `/wp-config.prod.bak-20261118` (account
+      root, outside the web root).
 - [x] konsoleH cron (single slot): path switched from
       `/usr/www/users/tessry/labouche/wp-cron.php` to
       `/usr/www/users/tessry/wp-cron.php` (every 15 min, `php85`, `flock`).
       Staging now has no cron — its runs fire only on page visits.
 - [ ] Next morning: check Scheduled Actions, WC log, and that the alert lands in
       Luce's inbox, not spam.
-- [ ] After 3–4 clean days: `LUCINA_ERACUNI_MONITOR_REPAIR = true`.
 
 ## Related, outside the module
 
