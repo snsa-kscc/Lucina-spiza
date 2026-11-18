@@ -403,3 +403,9 @@ State at handover:
   user's four `LUCINA_ERACUNI_API_*` constants, `LUCINA_ERACUNI_MONITOR_EMAILS =
   'sinisa@dvasadva.com,infobarbioza@gmail.com'`, `REPAIR = false`, and **no**
   `WP_ENVIRONMENT_TYPE` (needs Siniša's approval).
+- **konsoleH cron set up for staging (18.11.2026)** — the only slot (1 of 1):
+  `MAILTO=""` + `*/15 * * * *` PHP 8.2
+  `/usr/www/users/tessry/labouche/wp-cron.php`, exclusive (konsoleH wraps it in
+  `flock`). At go-live **edit this job** to `/usr/www/users/tessry/wp-cron.php`
+  (no second slot). Note: the "Add" confirmation page shows `@reboot` — that is
+  just the reset form; check Advanced View for what was stored.
