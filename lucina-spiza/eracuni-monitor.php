@@ -14,6 +14,8 @@
  *   LUCINA_ERACUNI_API_SECRET     API user's secret key
  *   LUCINA_ERACUNI_API_TOKEN      organization token
  *   LUCINA_ERACUNI_MONITOR_REPAIR true = resync missing orders (default false)
+ *   LUCINA_ERACUNI_MONITOR_EMAILS comma-separated alert recipients
+ *   WP_ENVIRONMENT_TYPE           'staging' on staging → "[STAGING]" in subject
  *
  * The module does nothing unless the API constants are defined.
  *
@@ -429,22 +431,29 @@ function lucina_eracuni_monitor_label( $outcome ) {
 }
 
 /**
- * Alert recipients. Luce only gets production alerts.
+ * Alert recipients: LUCINA_ERACUNI_MONITOR_EMAILS in wp-config.php, a
+ * comma-separated list, set per environment.
+ *
+ * @return string[]
  */
 function lucina_eracuni_monitor_recipients() {
-	$recipients = array( 'sinisa@dvasadva.com' );
+	$list = defined( 'LUCINA_ERACUNI_MONITOR_EMAILS' ) ? (string) LUCINA_ERACUNI_MONITOR_EMAILS : '';
 
-	if ( 'lucinaspiza.com' === wp_parse_url( home_url(), PHP_URL_HOST ) ) {
-		$recipients[] = 'infobarbioza@gmail.com';
-	}
-
-	return apply_filters( 'lucina_eracuni_monitor_recipients', $recipients );
+	return array_values( array_filter( array_map( 'trim', explode( ',', $list ) ), 'is_email' ) );
 }
 
 function lucina_eracuni_monitor_email( array $report ) {
+	$recipients = lucina_eracuni_monitor_recipients();
+	if ( ! $recipients ) {
+		lucina_eracuni_monitor_log( 'warning', 'LUCINA_ERACUNI_MONITOR_EMAILS nije postavljen — izvještaj nije poslan.' );
+		return;
+	}
+
 	$site  = wp_parse_url( home_url(), PHP_URL_HOST );
+	$env   = wp_get_environment_type();
+	$tag   = 'production' === $env ? '' : '[' . strtoupper( $env ) . '] ';
 	$lines = array(
-		'Dnevna provjera sinkronizacije narudžbi s e-Računima (' . $site . ').',
+		'Dnevna provjera sinkronizacije narudžbi s e-Računima (' . $site . ', okruženje: ' . $env . ').',
 		'',
 	);
 
@@ -465,8 +474,8 @@ function lucina_eracuni_monitor_email( array $report ) {
 	$lines[] = 'Automatska poruka, šalje se samo kad nešto treba pažnju.';
 
 	$sent = wp_mail(
-		lucina_eracuni_monitor_recipients(),
-		sprintf( '[%s] e-Računi: %d narudžbi treba pažnju', $site, count( $report ) ),
+		$recipients,
+		sprintf( '%s[%s] e-Računi: %d narudžbi treba pažnju', $tag, $site, count( $report ) ),
 		implode( "\n", $lines )
 	);
 

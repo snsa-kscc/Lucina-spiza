@@ -278,8 +278,13 @@ Register it in the module list in `lucina-spiza.php`.
 - **Guards:** no-op unless the `LUCINA_ERACUNI_API_*` constants are defined
   (staging has the test user → test company, so it can't reach the real
   books). Repair additionally needs `LUCINA_ERACUNI_MONITOR_REPAIR === true`
-  and a connected Eurofaktura plugin. Alerts go to Luce only when
-  `home_url()` host is `lucinaspiza.com`; otherwise only to Siniša.
+  and a connected Eurofaktura plugin.
+- **Recipients:** `LUCINA_ERACUNI_MONITOR_EMAILS` (comma-separated) in each
+  site's wp-config — staging: Siniša; production: Siniša + Luce. Not set ⇒
+  no email, warning in the log.
+- **Environment:** `WP_ENVIRONMENT_TYPE` (`wp_get_environment_type()`,
+  default `production`). Staging defines `staging`; production leaves it
+  unset. Non-production alert subjects start with `[STAGING]`.
 - **Schedule:** single Action Scheduler action at the next 04:00
   Europe/Zagreb (compute with `DateTimeZone('Europe/Zagreb')`); each run
   schedules the next; on init re-create if none pending. Avoids UTC/DST issues
@@ -292,8 +297,8 @@ Register it in the module list in `lucina-spiza.php`.
 - **Repair** (`missing` only, when `LUCINA_ERACUNI_MONITOR_REPAIR` is true):
   `order.synchronize` with a longer timeout (~30 s), then re-check. Order meta
   `_lucina_eracuni_monitor` = attempts + last outcome; give up after 2 runs.
-- **Alert:** plain-text `wp_mail` in Croatian to infobarbioza@gmail.com +
-  sinisa@dvasadva.com, only on a new outcome per order; admin edit links.
+- **Alert:** plain-text `wp_mail` in Croatian to `LUCINA_ERACUNI_MONITOR_EMAILS`,
+  only on a new outcome per order; admin edit links.
 - **Log:** `wc_get_logger()`, source `lucina-spiza-eracuni-monitor`.
 - **Test hook:** filter `lucina_eracuni_monitor_response` to stub API responses
   (synced / dropped / repair OK / repair fails / API down).
@@ -390,7 +395,11 @@ State at handover:
   written and registered; not deployed, no PR yet.
 - Staging `/public_html/labouche/wp-config.php`: `LUCINA_ERACUNI_API_URL`,
   `_USER`, `_SECRET`, `_TOKEN` (test user) and `LUCINA_ERACUNI_MONITOR_REPAIR
-  = false` added in the custom-values block; uploaded over SFTP, verified by
+  = false`, `LUCINA_ERACUNI_MONITOR_EMAILS = sinisa@dvasadva.com` and
+  `WP_ENVIRONMENT_TYPE = staging` added in the custom-values block; uploaded over SFTP, verified by
   sha256, site 200. (Upload also normalized the file from CRLF to LF.)
 - Local copy of the test credentials: `.env.local` (git-ignored).
-- Production wp-config untouched; production API user not yet created/added.
+- Production wp-config untouched. For go-live it needs the production API
+  user's four `LUCINA_ERACUNI_API_*` constants, `LUCINA_ERACUNI_MONITOR_EMAILS =
+  'sinisa@dvasadva.com,infobarbioza@gmail.com'`, `REPAIR = false`, and **no**
+  `WP_ENVIRONMENT_TYPE` (needs Siniša's approval).
