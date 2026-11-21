@@ -75,7 +75,7 @@ exempts only non-`HR` billing countries.
 - `docs/b2b-vat-exemption.md` — how company orders get 0% VAT (B2B paused).
 - `docs/vies-validation-proposal.md` — proposed VIES lookup before granting
   B2B exemption; pending client decision, no code.
-- `docs/gift-option-proposal.md` — plan to hide the checkout gift checkbox
-  when no product in the cart can be a gift; awaiting client approval.
+- `docs/miniclass-product-plan.md` — publish plan for the new Miniclass
+  HIBRIDNA KREMA product (staging → production, home page 8th tile).
 - `docs/deployment.md` — CI deploy to staging/production, secrets.
 - `docs/remote-access.md` — SFTP-only access, safe wp-config edits.
