@@ -478,7 +478,7 @@ function lucina_eracuni_monitor_run() {
 				'checked' => time(),
 			)
 		);
-		$order->save_meta_data();
+		lucina_eracuni_monitor_save_quietly( $order );
 
 		$changed  = $result['outcome'] !== $result['previous'];
 		$resolved = 'synced' === $result['outcome'] && '' !== $result['previous'] && 'synced' !== $result['previous'];
@@ -498,6 +498,30 @@ function lucina_eracuni_monitor_run() {
 	}
 
 	return $results;
+}
+
+/**
+ * Saves the monitor's order meta without firing WooCommerce webhooks.
+ *
+ * With HPOS, saving order meta fires `woocommerce_update_order`, so every
+ * nightly run sent an `order.updated` webhook to e-Računi for every order it
+ * checked. The order itself didn't change, so mute webhooks for this order
+ * while its meta is saved.
+ *
+ * @param WC_Order $order Order whose meta was updated.
+ */
+function lucina_eracuni_monitor_save_quietly( $order ) {
+	$order_id = $order->get_id();
+	$mute     = static function ( $should_deliver, $webhook, $arg ) use ( $order_id ) {
+		return 'order' === $webhook->get_resource() && (int) $arg === $order_id ? false : $should_deliver;
+	};
+
+	add_filter( 'woocommerce_webhook_should_deliver', $mute, 99, 3 );
+	try {
+		$order->save_meta_data();
+	} finally {
+		remove_filter( 'woocommerce_webhook_should_deliver', $mute, 99 );
+	}
 }
 
 function lucina_eracuni_monitor_detail( $sales_order ) {

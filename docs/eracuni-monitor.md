@@ -11,6 +11,17 @@ and never retries, so the order is silently lost from the books. The
 Sinkroniziraj button in the order's e-Računi box fixes it, without
 duplicates — the monitor does the same automatically.
 
+Likely trigger: each paid order fired two WooCommerce webhooks to the same
+e-Računi URL (#3 `order.created`, #4 `order.updated`), delivered with
+identical payloads within a second. `eracuni.php` now drops the
+`order.updated` delivery while an `order.created` one for the same order is
+queued or pending (log source `lucina-spiza-eracuni`). The monitor stays as
+the safety net.
+
+The monitor saves its order meta with webhooks muted for that order — with
+HPOS a meta save fires `order.updated`, which used to send e-Računi one
+webhook per checked order every night.
+
 Never issue a račun for a web order by hand: the shop flow is narudžba kupca →
 račun, and manual invoices break numbering and analytics.
 
